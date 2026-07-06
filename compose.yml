@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  ros2_dev:
+    build: .                           # 같은 경로의 Dockerfile을 빌드
+    container_name: ros2_ai_workspace
+    
+    # 터미널 유지를 위한 설정
+    stdin_open: true 
+    tty: true
+
+    network_mode: "host"
+    ipc: host
+    pid: host
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ./src:/workspace/src
