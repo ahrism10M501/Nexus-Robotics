@@ -1,0 +1,22 @@
+{
+  "name": "Nexus Robotics ROS2",
+  "dockerComposeFile": "../compose.yml",
+  "service": "ros2_dev",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-iot.vscode-ros"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postStartCommand": "bash -lc 'source /etc/profile.d/nexus_env.bash && cd /workspace && if find src -mindepth 1 -maxdepth 3 -name package.xml | grep -q .; then colcon build --symlink-install; fi'"
+}

@@ -1,0 +1,21 @@
+doc/
+
+# ROS 2 workspace outputs
+build/
+install/
+log/
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Local datasets and model artifacts
+data/*
+!data/.gitkeep
+checkpoints/*
+!checkpoints/.gitkeep
+
+# Local secrets
+.env
