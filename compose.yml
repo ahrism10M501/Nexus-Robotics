@@ -18,6 +18,7 @@ services:
       QT_X11_NO_MITSHM: "1"
       ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
       RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      FASTDDS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
       FASTRTPS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
       NVIDIA_VISIBLE_DEVICES: all
       NVIDIA_DRIVER_CAPABILITIES: all
