@@ -21,9 +21,19 @@ Doosan tutorial의 package 구성과 실행 방식은 workspace setup에 맞춰 
 ## 시작하기 전에
 
 Day 6의 virtual MoveIt bringup이 실행되어 있어야 합니다. real hardware에는 연결하지
-않습니다.
+않습니다. Doosan container를 시작하고 shell로 들어간 뒤 bringup terminal을 하나
+유지합니다.
 
 ```bash
+cd /home/ahrism/workspace/ros2-dev
+./run.sh doosan-dev
+```
+
+Doosan container 안에서:
+
+```bash
+source /etc/profile.d/nexus_env.bash
+cd /workspace
 ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py \
   mode:=virtual \
   model:=a0912 \
@@ -31,7 +41,15 @@ ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py \
   port:=12345
 ```
 
-다른 container shell에서 ROS2와 Doosan workspace가 source되어 있는지 확인합니다.
+다른 host terminal에서 같은 Doosan container shell을 하나 더 열고, ROS2와 Doosan
+workspace가 source되어 있는지 확인합니다.
+
+```bash
+cd /home/ahrism/workspace/ros2-dev
+./run.sh doosan-shell
+```
+
+Doosan container 안에서:
 
 ```bash
 source /etc/profile.d/nexus_env.bash

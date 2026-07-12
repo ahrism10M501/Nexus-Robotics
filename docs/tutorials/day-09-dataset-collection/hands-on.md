@@ -32,7 +32,14 @@ cd /home/ahrism/workspace/ros2-dev
 ./scripts/launch_isaac_sim.sh
 ```
 
-container shell에서 ROS2 환경을 준비합니다.
+다른 terminal에서는 기본 ROS2 container를 시작하고 ROS2 환경을 준비합니다.
+
+```bash
+cd /home/ahrism/workspace/ros2-dev
+./run.sh dev
+```
+
+container 안에서:
 
 ```bash
 source /etc/profile.d/nexus_env.bash

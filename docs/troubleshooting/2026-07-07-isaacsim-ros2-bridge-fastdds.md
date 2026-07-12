@@ -160,8 +160,8 @@ FastDDS profile은 process 시작 시점에 읽힌다.
 파일만 바꾼 뒤에는 반드시 Docker container와 Isaac Sim을 둘 다 재시작해야 한다.
 
 ```bash
-docker compose down
-docker compose up -d --force-recreate
+./run.sh down
+./run.sh up
 ```
 
 Isaac Sim은 완전히 종료한 뒤 host에서 다시 실행한다.

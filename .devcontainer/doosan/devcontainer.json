@@ -1,0 +1,28 @@
+{
+  "name": "Nexus Robotics ROS2 Doosan",
+  "dockerComposeFile": [
+    "../../compose.yml",
+    "compose.yml"
+  ],
+  "service": "doosan_dev",
+  "workspaceFolder": "/workspace",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "root",
+  "runServices": [
+    "doosan_dev"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance",
+        "ms-iot.vscode-ros"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/bin/python3",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      }
+    }
+  },
+  "postStartCommand": "bash -lc 'source /etc/profile.d/nexus_env.bash && ros2 pkg prefix dsr_bringup2 && cd /workspace && if find src -mindepth 1 -maxdepth 3 -name package.xml | grep -q .; then colcon build --symlink-install; fi'"
+}

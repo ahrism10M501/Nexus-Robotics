@@ -14,6 +14,14 @@ if [ -f "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash" ]; then
   source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
 fi
 
+if [ -f "/opt/robot_ws/isaacsim_ros/${ROS_DISTRO:-jazzy}_ws/install/setup.bash" ]; then
+  source "/opt/robot_ws/isaacsim_ros/${ROS_DISTRO:-jazzy}_ws/install/setup.bash"
+fi
+
+if [ -f "/opt/robot_ws/doosan_ws/install/setup.bash" ]; then
+  source "/opt/robot_ws/doosan_ws/install/setup.bash"
+fi
+
 if [ -f "${VENV_DIR}/bin/activate" ]; then
   source "${VENV_DIR}/bin/activate"
 fi

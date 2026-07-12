@@ -27,11 +27,11 @@ cd /home/ahrism/workspace/ros2-dev
 ./scripts/launch_isaac_sim.sh
 ```
 
-다른 terminal에서는 container shell로 들어갑니다.
+다른 terminal에서는 기본 ROS2 container를 시작하고 shell로 들어갑니다.
 
 ```bash
 cd /home/ahrism/workspace/ros2-dev
-./run.sh shell
+./run.sh dev
 ```
 
 container 안에서 ROS2 환경을 확인합니다.
