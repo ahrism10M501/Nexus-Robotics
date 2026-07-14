@@ -1,173 +1,142 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-COMPOSE_SERVICE="${COMPOSE_SERVICE:-ros2_dev}"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export NEXUS_ENV_FILE="$ROOT/.env"
+source "$ROOT/scripts/lib/config.bash"
+source "$ROOT/scripts/lib/profile.bash"
+cd "$ROOT"
 
 usage() {
   cat <<'USAGE'
 Usage: ./run.sh <command>
 
 Commands:
-  build            Build the default lightweight ROS2 Docker image
-  up               Start the dev container and allow local root X11 GUI access
-  shell            Open an interactive shell in the dev container
-  dev              Start the container, then open a shell
-  workspace-build  Run colcon build --symlink-install inside the container
-  doosan-build     Build the Doosan/MoveIt Docker image
-  doosan-up        Start the Doosan container profile
-  doosan-shell     Open an interactive shell in the Doosan container
-  doosan-dev       Start the Doosan container, then open a shell
-  doosan-check     Check Doosan packages, MoveIt package, Docker socket, and ROS env
-  full-build       Build the full Isaac ROS workspace + Doosan Docker image
-  full-up          Start the full container profile
-  full-shell       Open an interactive shell in the full container
-  full-dev         Start the full container, then open a shell
-  full-check       Check Full packages, Docker socket, and ROS env
-  status           Show compose container status
-  down             Stop the dev container and revoke local root X11 GUI access
+  init
+  doctor, build, up, shell, dev, check, status, down
+  <profile>-doctor, <profile>-build, <profile>-up, <profile>-shell
+  <profile>-dev, <profile>-check, <profile>-status, <profile>-down
 
-Legacy aliases:
-  moveit-build, moveit-up, moveit-shell, moveit-dev, moveit-check map to full-* commands
+Unprefixed actions use the core profile. The standard host diagnostic is
+./run.sh isaac-host-doctor.
 USAGE
 }
 
-allow_x11_root() {
-  if [ -n "${DISPLAY:-}" ] && command -v xhost >/dev/null 2>&1; then
-    xhost +local:root >/dev/null
+dispatch_error() {
+  printf 'E_PROFILE: %s\n' "$*" >&2
+  return 1
+}
+
+parse_command() {
+  local command="$1" candidate suffix
+  profile=''
+  action=''
+
+  case "$command" in
+    doctor|build|up|shell|dev|check|status|down)
+      profile=core
+      action="$command"
+      return 0
+      ;;
+  esac
+
+  for candidate in doctor build up shell dev check status down; do
+    suffix="-$candidate"
+    if [[ "$command" == *"$suffix" ]]; then
+      profile="${command%"$suffix"}"
+      action="$candidate"
+      return 0
+    fi
+  done
+  dispatch_error "unknown command: $command"
+}
+
+require_direct_command() {
+  local label="$1" path="$2"
+  [[ -f "$path" ]] || dispatch_error "$label command is not a regular file: $path" || return 1
+  [[ -x "$path" ]] || dispatch_error "$label command is not executable: $path" || return 1
+}
+
+require_compose_files() {
+  local path
+  for path in "${compose_files[@]}"; do
+    [[ -f "$path" ]] || dispatch_error "Compose file does not exist: $path" || return 1
+  done
+}
+
+require_normalized_service() {
+  local services_output
+  if ! services_output="$("${compose_argv[@]}" config --services)"; then
+    dispatch_error 'Compose normalization failed'
+    return 1
+  fi
+  if ! grep -Fxq -- "$service" <<< "$services_output"; then
+    dispatch_error "SERVICE is absent from normalized Compose output: $service"
+    return 1
   fi
 }
 
-revoke_x11_root() {
-  if [ -n "${DISPLAY:-}" ] && command -v xhost >/dev/null 2>&1; then
-    xhost -local:root >/dev/null || true
-  fi
-}
+dispatch_lifecycle() {
+  nexus_validate_env
+  nexus_compose_args
+  require_compose_files
+  require_normalized_service
 
-compose_exec() {
-  case "$COMPOSE_SERVICE" in
-    doosan_dev)
-      docker compose --profile doosan exec "$COMPOSE_SERVICE" "$@"
+  case "$action" in
+    build)
+      "${compose_argv[@]}" build "$service"
       ;;
-    full_dev|moveit_dev)
-      docker compose --profile full exec full_dev "$@"
+    up)
+      "${compose_argv[@]}" up -d "$service"
       ;;
-    *)
-      docker compose exec "$COMPOSE_SERVICE" "$@"
+    shell)
+      "${compose_argv[@]}" exec "$service" bash
+      ;;
+    dev)
+      "${compose_argv[@]}" up -d "$service"
+      "${compose_argv[@]}" exec "$service" bash
+      ;;
+    status)
+      "${compose_argv[@]}" ps "$service"
+      ;;
+    down)
+      "${compose_argv[@]}" down
       ;;
   esac
 }
 
-doosan_exec() {
-  docker compose --profile doosan exec doosan_dev "$@"
-}
-
-full_exec() {
-  docker compose --profile full exec full_dev "$@"
-}
-
-doosan_check() {
-  doosan_exec bash -lc '
-    set -eo pipefail
-    source /etc/profile.d/nexus_env.bash
-    echo "ROS_DISTRO=${ROS_DISTRO:-}"
-    echo "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-}"
-    echo "RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-}"
-    echo "FASTDDS_DEFAULT_PROFILES_FILE=${FASTDDS_DEFAULT_PROFILES_FILE:-}"
-    ros2 pkg prefix dsr_bringup2
-    ros2 pkg prefix moveit_ros_move_group
-    docker ps >/dev/null
-    test -x /opt/robot_ws/doosan_ws/src/doosan-robot2/install_emulator.sh
-    echo "doosan environment looks consistent"
-  '
-}
-
-full_check() {
-  full_exec bash -lc '
-    set -eo pipefail
-    source /etc/profile.d/nexus_env.bash
-    echo "ROS_DISTRO=${ROS_DISTRO:-}"
-    echo "ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-}"
-    echo "RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-}"
-    echo "FASTDDS_DEFAULT_PROFILES_FILE=${FASTDDS_DEFAULT_PROFILES_FILE:-}"
-    ros2 pkg prefix dsr_bringup2
-    ros2 pkg prefix isaac_moveit
-    ros2 pkg prefix moveit_ros_move_group
-    docker ps >/dev/null
-    test -x /opt/robot_ws/doosan_ws/src/doosan-robot2/install_emulator.sh
-    echo "full environment looks consistent"
-  '
-}
-
 command="${1:-}"
+if [[ "$command" == init ]]; then
+  shift
+  (($# == 0)) || dispatch_error 'init does not accept arguments' || exit 1
+  nexus_init_env
+  exit 0
+fi
 
 case "$command" in
-  build)
-    docker compose build
-    ;;
-  up)
-    allow_x11_root
-    docker compose up -d
-    ;;
-  shell)
-    compose_exec bash
-    ;;
-  dev)
-    allow_x11_root
-    docker compose up -d
-    compose_exec bash
-    ;;
-  workspace-build)
-    compose_exec bash -lc 'source /etc/profile.d/nexus_env.bash && cd /workspace && colcon build --symlink-install'
-    ;;
-  doosan-build)
-    docker compose --profile doosan build doosan_dev
-    ;;
-  doosan-up)
-    allow_x11_root
-    docker compose --profile doosan up -d doosan_dev
-    ;;
-  doosan-shell)
-    doosan_exec bash
-    ;;
-  doosan-dev)
-    allow_x11_root
-    docker compose --profile doosan up -d doosan_dev
-    doosan_exec bash
-    ;;
-  doosan-check)
-    doosan_check
-    ;;
-  full-build|moveit-build)
-    docker compose --profile full build full_dev
-    ;;
-  full-up|moveit-up)
-    allow_x11_root
-    docker compose --profile full up -d full_dev
-    ;;
-  full-shell|moveit-shell)
-    full_exec bash
-    ;;
-  full-dev|moveit-dev)
-    allow_x11_root
-    docker compose --profile full up -d full_dev
-    full_exec bash
-    ;;
-  full-check|moveit-check)
-    full_check
-    ;;
-  status)
-    docker compose --profile doosan --profile full ps
-    ;;
-  down)
-    docker compose --profile doosan --profile full down
-    revoke_x11_root
-    ;;
-  ""|-h|--help|help)
+  ''|-h|--help|help)
     usage
+    exit 0
     ;;
-  *)
-    echo "Unknown command: $command" >&2
-    usage >&2
-    exit 1
+esac
+
+shift
+parse_command "$command"
+nexus_load_profile "$profile"
+
+case "$action" in
+  doctor)
+    require_direct_command doctor "${doctor_argv[0]}"
+    doctor_argv+=("$@")
+    "${doctor_argv[@]}"
+    ;;
+  check)
+    require_direct_command check "${check_argv[0]}"
+    check_argv+=("$@")
+    "${check_argv[@]}"
+    ;;
+  build|up|shell|dev|status|down)
+    (($# == 0)) || dispatch_error "$action does not accept arguments" || exit 1
+    dispatch_lifecycle
     ;;
 esac

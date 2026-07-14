@@ -143,8 +143,8 @@ FASTRTPS_DEFAULT_PROFILES_FILE=/workspace/config/fastdds.xml
 Host Isaac Sim launcher에서는 workspace path를 사용한다.
 
 ```bash
-FASTDDS_DEFAULT_PROFILES_FILE=/home/ahrism/workspace/ros2-dev/config/fastdds.xml
-FASTRTPS_DEFAULT_PROFILES_FILE=/home/ahrism/workspace/ros2-dev/config/fastdds.xml
+FASTDDS_DEFAULT_PROFILES_FILE=$REPO_ROOT/config/fastdds.xml
+FASTRTPS_DEFAULT_PROFILES_FILE=$REPO_ROOT/config/fastdds.xml
 ```
 
 변경된 파일:
@@ -160,8 +160,8 @@ FastDDS profile은 process 시작 시점에 읽힌다.
 파일만 바꾼 뒤에는 반드시 Docker container와 Isaac Sim을 둘 다 재시작해야 한다.
 
 ```bash
-./run.sh down
-./run.sh up
+./run.sh isaac-host-down
+./run.sh isaac-host-up
 ```
 
 Isaac Sim은 완전히 종료한 뒤 host에서 다시 실행한다.
@@ -171,6 +171,20 @@ Isaac Sim은 완전히 종료한 뒤 host에서 다시 실행한다.
 ```
 
 ## Verification
+
+먼저 실행 중인 host Isaac Sim과 core 컨테이너 사이의 bridge를 변경 없이 점검한다.
+
+```bash
+cd "$REPO_ROOT"
+bash scripts/check_isaac_host.bash
+```
+
+- `PASS`와 `/clock observed`가 나오면 bridge가 정상이다.
+- Isaac Sim 또는 NVIDIA host 조건이 없으면 `SKIP E_PREREQUISITE`와 종료 코드 `77`이 나온다.
+- 조건이 갖춰진 host에서 `FAIL E_PREREQUISITE`가 나오면 blocking failure로 처리하고 안내된
+  조치를 수행한다.
+
+이 검사는 container나 simulator를 시작·종료하지 않고 현재 상태만 읽는다.
 
 컨테이너 내부에서 환경변수를 확인한다.
 

@@ -1,0 +1,22 @@
+x-gui: &gui
+  environment:
+    DISPLAY: "${DISPLAY}"
+    XAUTHORITY: /tmp/.nexus.xauth
+    QT_X11_NO_MITSHM: "1"
+  volumes:
+    - type: bind
+      source: /tmp/.X11-unix
+      target: /tmp/.X11-unix
+      read_only: true
+      bind:
+        create_host_path: false
+    - type: bind
+      source: "${NEXUS_XAUTH_FILE:?NEXUS_XAUTH_FILE is required}"
+      target: /tmp/.nexus.xauth
+      read_only: true
+      bind:
+        create_host_path: false
+
+services:
+  ros2_dev: *gui
+  ai_dev: *gui

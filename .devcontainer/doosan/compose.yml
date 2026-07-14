@@ -1,3 +1,0 @@
-services:
-  doosan_dev:
-    profiles: !reset []

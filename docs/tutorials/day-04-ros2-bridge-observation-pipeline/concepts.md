@@ -41,8 +41,8 @@ prim이 있고, render product가 있으며, `ROS2 Camera Helper`가 image topic
 image size 같은 data가 포함됩니다. ROS2 visualization과 perception pipeline은 image topic과
 `camera_info`를 같이 볼 때 camera observation을 제대로 해석할 수 있습니다.
 
-Day 9 dataset을 생각하면 이 둘의 짝이 더 중요해집니다. RGB만 저장하면 나중에 observation이 어떤
-camera geometry에서 나온 것인지 잃기 쉽습니다.
+후속 dataset 실습을 생각하면 이 둘의 짝이 더 중요해집니다. RGB만 저장하면 나중에
+observation이 어떤 camera geometry에서 나온 것인지 잃기 쉽습니다.
 
 ## QoS mismatch
 
