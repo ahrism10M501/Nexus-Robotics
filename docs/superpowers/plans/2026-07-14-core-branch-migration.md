@@ -88,6 +88,8 @@
 **Files:**
 - Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/user-damin.patch`
 - Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/manifest.txt`
+- Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/root-worktree.manifest`
+- Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/feature-worktree.manifest`
 - Verify worktree: `/home/ahrism/workspace/ros2-dev/.worktrees/core-branch-migration`
 
 **Interfaces:**
@@ -133,21 +135,52 @@ test "$(sha256sum "$BACKUP/manifest.txt" | awk '{print $1}')" = \
   39478896d14aefd7c1f40b46a3117974d45917811d90c108818ccc5cb2df92da
 test "$(sha256sum "$BACKUP/user-damin.patch" | awk '{print $1}')" = \
   a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
-test "$(git -C "$ROOT" diff --binary -- Dockerfile.doosan \
-  scripts/check_dev_workflow.sh | sha256sum | awk '{print $1}')" = \
-  a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
-test "$(sha256sum "$ROOT/Dockerfile.doosan" | cut -d' ' -f1)" = \
-  d236f98f1185458b52aab3d6ed49b8eb208a87afcc8662739e4841951422a4a9
-test "$(sha256sum "$ROOT/scripts/check_dev_workflow.sh" | cut -d' ' -f1)" = \
-  06b0a687b041b3b9a4f66be1b5ca84e606ae1e7a155c3e136a315a62aa64235f
-test "$(sha256sum "$ROOT/docs/[리버트론]OpenArm(AA-K1)_User Manual_한글판.pdf" | cut -d' ' -f1)" = \
-  6b35dd70c72ac76eed385adfedb9936d13d514fec74e4a8811aa321c888560e6
+
+manifest_value() { sed -n "s/^$2=//p" "$1"; }
+verify_worktree_manifest() {
+  local manifest="$1" manifest_sha="$2" wt expected actual line record path file_sha
+  test "$(sha256sum "$manifest" | awk '{print $1}')" = "$manifest_sha"
+  wt="$(manifest_value "$manifest" worktree)"
+  expected="$(manifest_value "$manifest" head)"
+  test "$(git -C "$wt" rev-parse HEAD)" = "$expected"
+  expected="$(manifest_value "$manifest" status_porcelain_v1_z_sha256)"
+  actual="$(git -C "$wt" status --porcelain=v1 -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" tracked_binary_diff_sha256)"
+  actual="$(git -C "$wt" diff --binary | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" untracked_paths_z_sha256)"
+  actual="$(git -C "$wt" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  while IFS= read -r line; do
+    case "$line" in
+      tracked_sha256=*|untracked_sha256=*)
+        record="${line%%  *}"
+        path="${line#*  }"
+        file_sha="${record#*=}"
+        test -f "$wt/$path"
+        test "$(sha256sum "$wt/$path" | awk '{print $1}')" = "$file_sha"
+        ;;
+    esac
+  done < "$manifest"
+}
+
+test "$(manifest_value "$BACKUP/root-worktree.manifest" head)" = \
+  744a8a9bda98dd6b7fd50a0703bf6fefab981bc5
+test "$(manifest_value "$BACKUP/feature-worktree.manifest" head)" = \
+  bbce9bdb91a76ed57755542586bfcd6e0af61ba9
+verify_worktree_manifest "$BACKUP/root-worktree.manifest" \
+  ebd801615fe1d523757048ba1f6f884f57956af7181a74f99cc3e7fc3a0e3780
+verify_worktree_manifest "$BACKUP/feature-worktree.manifest" \
+  09a318b77f6447e78ca9801db3f4ba7583f54c5dd0edaeaa5ea07fd3190eeb5e
+test -f "$ROOT/user-ws/damin/tutorial-7.py"
 git -C "$ROOT" status --short --branch
 git -C "$FEATURE" status --short --branch
 ```
 
-Expected: checksums match and both status commands still report their known tracked and untracked
-changes. Do not clean, stash, reset, or checkout either worktree.
+Expected: both external manifest hashes, exact HEADs, NUL-delimited status and untracked-list
+hashes, full binary-diff hashes, and every recorded tracked/untracked file hash match. This includes
+the PDF and `user-ws/damin/tutorial-7.py`. Do not clean, stash, reset, or checkout either worktree.
 
 ---
 
@@ -174,6 +207,7 @@ Extend `tests/test_static_contract.bash` to require exactly:
 ```bash
 assert_file scripts/generate_ai_lock.bash
 assert_file tests/test_ai_lock.bash
+test -x scripts/generate_ai_lock.bash || fail 'lock generator is not executable'
 assert_contains docker/versions.env \
   'ROS_BASE_IMAGE=ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f'
 assert_contains docker/versions.env \
@@ -196,9 +230,11 @@ pins=(
   'huggingface-hub==0.33.4' 'einops==0.8.1' 'timm==1.0.17'
 )
 for pin in "${pins[@]}"; do
-  grep -Fxq "$pin" docker/requirements/ai.in || fail "missing direct input pin: $pin"
-  grep -Eq "^${pin//./\\.}([ ;\\]|$)" docker/requirements/ai.lock || \
-    fail "missing direct lock pin: $pin"
+  test "$(grep -Fxc "$pin" docker/requirements/ai.in)" -eq 1 || \
+    fail "direct input pin must occur exactly once: $pin"
+  escaped="${pin//./\\.}"
+  test "$(grep -Ec "^${escaped}([ ;\\]|$)" docker/requirements/ai.lock)" -eq 1 || \
+    fail "direct lock pin must occur exactly once: $pin"
 done
 grep -q -- '--hash=sha256:' docker/requirements/ai.lock || fail 'lock has no hashes'
 grep -Eq '^nvidia-.*platform_machine.*x86_64' docker/requirements/ai.lock || \
@@ -283,22 +319,30 @@ install -m 0644 "$tmp/out/ai.lock" "$ROOT/docker/requirements/ai.lock"
 ```
 
 The real script derives `ROOT` from `BASH_SOURCE`, begins from a newly cleaned `mktemp` directory,
-and supports `--validate-only` without rewriting the tracked lock. It never mounts the repository
-writable, never executes `/uv pip` inside the uv image, and never uses an unpinned image.
+and supports `--validate-only` without rewriting the tracked lock. Generation and validation both
+extract the native child of the exact pinned uv OCI index once and run inside the native child of
+the exact pinned ROS OCI index. They never mount the repository writable, never execute the uv
+scratch image as a runtime, never use QEMU/binfmt, and never use an unpinned image.
 
-For `--validate-only`, loop over `linux/amd64` and `linux/arm64`. Inside each iteration create the uv
-temporary container with `docker create --platform "$platform" "$UV_IMAGE"`, extract that
-platform's `/uv` into a freshly cleaned per-platform directory, and run the exact pinned ROS base
-with the same `--platform`. Use `--read-only`, host UID/GID, lock/input mounts read-only, and
-writable tmpfs, then create a temporary Python 3.12 venv and execute:
+For `--validate-only`, reuse that same native pinned uv binary and native pinned ROS container and
+create a writable temporary Python 3.12 venv before running the two explicit target-platform
+resolutions:
 
 ```bash
+/usr/local/bin/uv venv --python 3.12 /tmp/venv
 /usr/local/bin/uv pip install --dry-run --require-hashes --only-binary=:all: \
-  --python /tmp/venv/bin/python /requirements/ai.lock
+  --python /tmp/venv/bin/python --python-version 3.12 \
+  --python-platform x86_64-manylinux_2_39 /requirements/ai.lock
+/usr/local/bin/uv pip install --dry-run --require-hashes --only-binary=:all: \
+  --python /tmp/venv/bin/python --python-version 3.12 \
+  --python-platform aarch64-manylinux_2_39 /requirements/ai.lock
 ```
 
-Expected: both platform dry-runs resolve wheels only. An sdist, missing hash, missing arm64 wheel,
-or unmarked NVIDIA/triton requirement fails validation.
+Expected: both target-platform resolutions select wheels only. An sdist, missing hash, missing
+arm64 wheel, duplicate/missing direct pin, or unmarked NVIDIA/triton requirement fails validation.
+`tests/test_image_indexes.bash` separately proves both pinned indexes expose amd64 and arm64
+children; actual arm64 container execution belongs to authoritative Task 8 CI and, only after the
+native/QEMU preflight passes, Task 9 local acceptance.
 
 - [ ] **Step 5: Regenerate, verify, and commit the forward correction**
 
@@ -306,6 +350,8 @@ Run:
 
 ```bash
 bash -n scripts/generate_ai_lock.bash tests/test_ai_lock.bash
+chmod 0755 scripts/generate_ai_lock.bash
+test -x scripts/generate_ai_lock.bash
 scripts/generate_ai_lock.bash
 bash tests/test_static_contract.bash
 bash tests/test_ai_lock.bash
@@ -318,8 +364,9 @@ git diff --cached --name-only
 git commit -m "build: correct portable core inputs"
 ```
 
-Expected: exactly the seven listed paths are committed after `e6da3b4`; both exact pins/indexes, all six
-direct pins, hashes, x86_64 NVIDIA/triton markers, and amd64/arm64 wheel-only dry-runs pass.
+Expected: exactly the seven listed paths are committed after `e6da3b4`; both exact pins/indexes,
+all six direct pins occur exactly once in each input/lock, hashes and x86_64 NVIDIA/triton markers
+pass, and both manylinux target-platform wheel-only dry-runs pass without QEMU.
 
 ---
 
@@ -543,13 +590,15 @@ docker compose --env-file docker/versions.env --env-file "$tmp/local.env" \
   -f compose.yml --profile ai config --format json > "$base"
 jq -e '.services.ros2_dev.build.target == "ros-python-dev"' "$base"
 for service in ros2_dev ai_dev; do
-  jq -e --arg s "$service" '.services[$s].user != null and
-    .services[$s].user != "" and .services[$s].user != "0" and
-    .services[$s].user != "0:0" and .services[$s].user != "root"' "$base"
+  jq -e --arg s "$service" '.services[$s].user == "developer"' "$base"
   jq -e --arg s "$service" '.services[$s] | has("container_name") | not' "$base"
   jq -e --arg s "$service" '.services[$s] | has("network_mode") | not' "$base"
   jq -e --arg s "$service" '.services[$s] | has("pid") | not' "$base"
   jq -e --arg s "$service" '.services[$s] | has("ipc") | not' "$base"
+  jq -e --arg s "$service" '.services[$s].privileged != true' "$base"
+  jq -e --arg s "$service" '(.services[$s].cap_add // []) | length == 0' "$base"
+  jq -e --arg s "$service" '(.services[$s].devices // []) | length == 0' "$base"
+  jq -e --arg s "$service" '(.services[$s].device_cgroup_rules // []) | length == 0' "$base"
   jq -e --arg s "$service" \
     '[.services[$s].volumes[]?.target] | index("/var/run/docker.sock") | not' "$base"
   for arg in ROS_BASE_IMAGE UV_IMAGE DEVELOPER_UID DEVELOPER_GID; do
@@ -568,22 +617,25 @@ Expected: FAIL because current base has fixed name and host privileges.
 
 - [ ] **Step 3: Implement base services and independent overrides**
 
-Use anchors for build args and non-root service defaults. Both services must include:
+Use anchors for build args and non-root service defaults. Mirror the exact immutable literals from
+`docker/versions.env` as fallback defaults so direct Dev Container Compose startup does not depend
+on `--env-file docker/versions.env`. Both services must include:
 
 ```yaml
 build:
   context: .
   dockerfile: Dockerfile
   args:
-    ROS_BASE_IMAGE: "${ROS_BASE_IMAGE:?ROS_BASE_IMAGE is required}"
-    UV_IMAGE: "${UV_IMAGE:?UV_IMAGE is required}"
-    DEVELOPER_UID: "${LOCAL_UID:?LOCAL_UID is required}"
-    DEVELOPER_GID: "${LOCAL_GID:?LOCAL_GID is required}"
-user: "${LOCAL_UID:?LOCAL_UID is required}:${LOCAL_GID:?LOCAL_GID is required}"
+    ROS_BASE_IMAGE: "${ROS_BASE_IMAGE:-ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f}"
+    UV_IMAGE: "${UV_IMAGE:-ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36}"
+    DEVELOPER_UID: "${LOCAL_UID:-1000}"
+    DEVELOPER_GID: "${LOCAL_GID:-1000}"
+user: developer
 ```
 
 `ros2_dev` selects `ros-python-dev`; `ai_dev` is in profile `ai` and selects `ros-ai-dev`. Both set
-`init: true`, ROS/FastDDS environment, and only the repository workspace bind. Keep the approved
+`init: true`, ROS/FastDDS environment, and only the repository workspace bind. Express that bind,
+like every bind in every file, with long syntax and `bind.create_host_path: false`. Keep the approved
 public profile files `core.conf` and `isaac-host.conf`; do not add a vendor-named profile.
 
 ```yaml
@@ -632,7 +684,7 @@ SERVICE=ros2_dev
 COMPOSE_FILES=compose.yml
 COMPOSE_PROFILES=
 DOCTOR_COMMAND=scripts/doctor.bash,base
-CHECK_COMMAND=tests/test_static_contract.bash
+CHECK_COMMAND=scripts/check_dev_workflow.sh
 ```
 
 ```text
@@ -642,7 +694,7 @@ SERVICE=ros2_dev
 COMPOSE_FILES=compose.yml,compose/host-dds.yml
 COMPOSE_PROFILES=
 DOCTOR_COMMAND=scripts/doctor.bash,isaac-host
-CHECK_COMMAND=scripts/doctor.bash,isaac-host
+CHECK_COMMAND=scripts/check_dev_workflow.sh
 ```
 
 - [ ] **Step 4: Expand tests for every supported normalized combination**
@@ -659,15 +711,25 @@ jq -e '.services.ai_dev.gpus != null' "$tmp/gpu.json"
 jq -e '.services.ros2_dev | has("gpus") | not' "$tmp/gpu.json"
 ```
 
-Render and validate these matrices: base; base+host DDS; base+GUI; base+host DDS+GUI; base with
-`--profile ai`; AI+GPU; AI+GUI; AI+host DDS; and AI+GPU+GUI+host DDS. For every normalized model,
-repeat the least-privilege checks for every present service and verify only the explicitly selected
-overlay grants host network, GPU, or GUI. Inspect both GUI binds for long syntax, `read_only: true`,
-and `bind.create_host_path: false`.
+Render the complete AI overlay power set: all eight combinations of host DDS on/off, GPU on/off,
+and GUI on/off with `--profile ai`. Separately render core-only, core+host, core+GUI, and
+core+host+GUI. For every normalized model, repeat the least-privilege checks for every present
+service and verify only the selected overlay grants host network, GPU, or GUI.
 
-Add negative fixtures for missing, empty, `0`, `0:0`, and `root` runtime identities; both services
-must fail normalization/validation rather than silently default. Assert the local Compose version is
-at least 2.30 here; Task 8 pins CI to an actual 2.30.x release so the syntax floor is proven.
+Reject or inspect `privileged`, `cap_add`, `devices`, `device_cgroup_rules`, Docker socket, PID,
+IPC, host network, GPU requests, and GUI mounts in base configuration. Inspect every bind in every
+render for long syntax with `bind.create_host_path: false`; X11 and Xauthority must also be
+read-only.
+
+Render fixtures with IDs `1000:1000` and `12345:12345`; assert both build args are positive and
+match the fixture while runtime `user` remains exactly `developer`. With all pin/ID variables unset,
+render `compose.yml` directly exactly as `.devcontainer/devcontainer.json` does and assert defaults
+are the two exact pins and `1000:1000`. Parse `docker/versions.env` as data and compare the rendered
+ROS/uv default literals for exact equality. Assert Dev Container service `ros2_dev`,
+`remoteUser=developer`, and `/opt/venv/bin/python` agree with this model.
+
+Check the local Compose version semantically as `>=2.30.0`; do not require 2.30.3 locally. Task 8
+pins CI to exact 2.30.3.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
@@ -677,13 +739,16 @@ Run:
 bash tests/test_compose.bash
 docker compose --env-file docker/versions.env --env-file .env.example config -q
 git diff --check
-git add compose.yml compose profiles tests/test_compose.bash
+git add compose.yml compose/host-dds.yml compose/gpu.yml compose/gui.yml \
+  profiles/core.conf profiles/isaac-host.conf tests/test_compose.bash
+test "$(git diff --cached --name-only | wc -l)" -eq 7
 git commit -m "build: isolate core runtime privileges"
 ```
 
-Expected: `compose core contract passed`; both services receive all four build args, all identity
-negative cases fail, every supported combination renders, both services remain least-privilege in
-base configuration, GUI binds cannot create host paths, and no vendor service exists.
+Expected: `compose core contract passed`; direct Dev Container startup renders without pin env
+files, literals equal `versions.env`, both fixture IDs reach build args while user stays
+`developer`, all twelve supported renders pass, every bind forbids host-path creation, both services
+remain least-privilege by default, and exactly the seven Task 4 paths are committed.
 
 ---
 
@@ -691,6 +756,7 @@ base configuration, GUI binds cannot create host paths, and no vendor service ex
 
 **Files:**
 - Modify: `run.sh`
+- Modify mode only if needed: `scripts/check_dev_workflow.sh`
 - Create: `scripts/lib/config.bash`
 - Create: `scripts/lib/profile.bash`
 - Create: `tests/test_init.bash`
@@ -715,7 +781,9 @@ empty SERVICE, COMPOSE_FILES, DOCTOR_COMMAND, or CHECK_COMMAND fails
 an empty COMPOSE_PROFILES value is accepted, but leading/trailing/doubled commas fail
 duplicate COMPOSE_FILES and COMPOSE_PROFILES items fail
 absolute paths and any .. path component fail
-Compose or check-command symlinks escaping the repository fail
+profile, Compose, or check-command symlinks escaping the repository fail
+unsafe SERVICE identifiers fail
+unknown and duplicate .env keys fail
 missing profile reports E_PROFILE
 core-dev resolves service ros2_dev and compose.yml
 isaac-host-dev resolves compose.yml plus compose/host-dds.yml
@@ -723,6 +791,7 @@ missing-dev on main fails E_PROFILE
 SERVICE missing from normalized Compose output fails before lifecycle execution
 profile values containing shell metacharacters are rejected
 generic-check and generic-doctor execute the fixture through direct argv
+real core and isaac-host dev/status/down emit exact NUL-delimited Docker argv
 ```
 
 The test command is `bash tests/test_init.bash && bash tests/test_profiles.bash`.
@@ -740,16 +809,24 @@ arrays without `eval` or `source`. Require every key exactly once; only `COMPOSE
 an empty whole value. Reject duplicate list entries and empty items from leading, trailing, or
 doubled commas.
 
-Profile names must match `[a-z0-9][a-z0-9-]*`. Every Compose file and the first argv item in each
-doctor/check command must be a non-absolute repository-relative path with no `..` component. Resolve
-each with `realpath`, require the canonical result to remain under `ROOT`, require it to be a regular
-file, and thereby reject a symlink escape. Split doctor/check values on commas into arrays only after
+Profile names must match `[a-z0-9][a-z0-9-]*`, and `SERVICE` must match the safe Compose identifier
+form `[A-Za-z0-9][A-Za-z0-9_.-]*`. Resolve the profile file itself with `realpath -e` and reject it
+unless it remains under `ROOT/profiles`. Every Compose file and the first argv item in each
+doctor/check command must be a non-absolute repository-relative path with no `..` component.
+Canonicalize them with `realpath -m` and require the result to remain under `ROOT`, thereby rejecting
+profile, Compose, and command symlink escapes.
+
+At profile-load time validate command-path syntax and canonical containment only. Defer the
+doctor/check command file's existence, regular-file, and executable checks until that exact action
+is dispatched; this is required because Task 5 precedes Task 6. Compose files must exist before a
+lifecycle action normalizes them. Split doctor/check values on commas into arrays only after syntax
 validation; remaining argv items are restricted scalar tokens, not paths or shell fragments.
 
 `scripts/lib/config.bash` must parse `.env` with the same data-only rule, validate UID/GID as
 positive integers, domain `0..232`, project name `[a-z0-9][a-z0-9_-]*`, copy `.env.example`
 only when `.env` is absent, and never overwrite an existing file. UID and GID 0 are invalid; a
-missing or empty runtime identity is invalid rather than defaulted.
+missing or empty runtime identity is invalid rather than defaulted. Reject unknown and duplicate
+`.env` keys while allowing the explicitly empty `ISAAC_SIM_ROOT=` value.
 
 - [ ] **Step 4: Replace `run.sh` with generic dispatch**
 
@@ -757,14 +834,20 @@ The dispatcher must support:
 
 ```text
 init, doctor, build, up, shell, dev, check, status, down
-<profile>-build, <profile>-up, <profile>-shell, <profile>-dev,
+<profile>-doctor, <profile>-build, <profile>-up, <profile>-shell, <profile>-dev,
 <profile>-check, <profile>-status, <profile>-down
 ```
 
 The suffix determines the action, the remaining prefix determines `profiles/<name>.conf`, and
-unprefixed lifecycle commands use `core`. Every Docker command uses both env files and every
-manifest Compose file. Before dispatch, run normalized `docker compose config --services` with the
-constructed argv and require an exact line equal to `SERVICE`.
+unprefixed actions use `core`. Standard doctor entrypoints are exactly `./run.sh doctor` and
+`./run.sh isaac-host-doctor`.
+
+`init`, `doctor`, and `check` bypass Compose normalization and service lookup. `doctor` must be able
+to diagnose a missing Docker executable/daemon, and `check` must be able to run static checks without
+Docker. Only lifecycle actions `build`, `up`, `shell`, `dev`, `status`, and `down` construct Compose
+argv, use both env files and every manifest Compose file, run normalized
+`docker compose config --services`, and require an exact line equal to `SERVICE` before lifecycle
+execution.
 
 Build doctor/check commands as arrays and execute `"${doctor_argv[@]}"` or
 `"${check_argv[@]}"`; lifecycle commands likewise use a Compose argv array. `run.sh` and both
@@ -776,17 +859,21 @@ The profile manifests use direct repo-contained argv:
 ```text
 # profiles/core.conf
 DOCTOR_COMMAND=scripts/doctor.bash,base
-CHECK_COMMAND=tests/test_static_contract.bash
+CHECK_COMMAND=scripts/check_dev_workflow.sh
 
 # profiles/isaac-host.conf
 DOCTOR_COMMAND=scripts/doctor.bash,isaac-host
-CHECK_COMMAND=scripts/doctor.bash,isaac-host
+CHECK_COMMAND=scripts/check_dev_workflow.sh
 ```
 
-In `tests/test_profiles.bash`, create and remove a temporary in-repository `generic.conf` plus a
-fixture executable that records each argument on its own line. Invoke the real
-`./run.sh generic-check` and `./run.sh generic-doctor`, then compare the captured argv exactly. Also
-stub Docker and assert service validation happened. Parser-only tests do not satisfy this step.
+In `tests/test_profiles.bash`, create and remove a temporary in-repository `generic.conf` plus
+fixture executables. Record every argument NUL-delimited, invoke the real
+`./run.sh generic-check` and `./run.sh generic-doctor`, and compare captured argv byte-for-byte.
+With a fake Docker that also records NUL-delimited argv, exercise actual `./run.sh dev`,
+`./run.sh status`, `./run.sh down`, `./run.sh isaac-host-dev`,
+`./run.sh isaac-host-status`, and `./run.sh isaac-host-down`. Assert exact env-file, Compose-file,
+service, and action argv, and assert normalized service validation occurs only for those lifecycle
+actions. Parser-only tests do not satisfy this step.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
@@ -794,20 +881,24 @@ Run:
 
 ```bash
 bash -n run.sh scripts/lib/config.bash scripts/lib/profile.bash
+chmod 0755 run.sh scripts/check_dev_workflow.sh
+test -x run.sh
+test -x scripts/check_dev_workflow.sh
 bash tests/test_init.bash
 bash tests/test_profiles.bash
 ! grep -Eqi 'doosan|openarm|isaac_ros' run.sh
 ! rg -n '\beval\b|\bsource[[:space:]]+profiles/|bash[[:space:]]+-c' \
   run.sh scripts/lib/config.bash scripts/lib/profile.bash
 git diff --check
-git add run.sh scripts/lib/config.bash scripts/lib/profile.bash \
+git add run.sh scripts/check_dev_workflow.sh scripts/lib/config.bash scripts/lib/profile.bash \
   tests/test_init.bash tests/test_profiles.bash
 git commit -m "feat: add generic environment profiles"
 ```
 
-Expected: every negative fixture fails with `E_PROFILE`, actual generic check/doctor dispatch uses
-the exact captured argv, service validation runs before dispatch, and the forbidden-shell scan plus
-vendor grep return no match.
+Expected: every negative fixture fails with `E_PROFILE`; generic doctor/check and core/Isaac
+lifecycle actions match NUL-delimited argv exactly; init/doctor/check never require Compose; service
+validation precedes lifecycle actions only; run/wrapper modes are 0755; and forbidden-shell/vendor
+scans return no match.
 
 ---
 
@@ -821,7 +912,8 @@ vendor grep return no match.
 - Create: `tests/test_isaac_host.bash`
 
 **Interfaces:**
-- Produces: `./run.sh doctor [core|isaac-host]`, error codes `E_PREREQUISITE` and compact PASS/FAIL output.
+- Produces: `./run.sh doctor`, `./run.sh isaac-host-doctor`, error codes `E_PREREQUISITE`,
+  and compact PASS/FAIL output.
 - Consumes: `.env`, `ISAAC_SIM_ROOT`, Docker/Compose commands, FastDDS config.
 
 - [ ] **Step 1: Write failing doctor scenarios**
@@ -867,10 +959,13 @@ change GPU settings, or issue simulator/robot motion commands.
 `exec "$ISAAC_SIM_ROOT/isaac-sim.sh" "$@"`. It must not install or download Isaac Sim.
 
 `scripts/check_isaac_host.bash` is a non-destructive bridge acceptance. It never starts Isaac and
-never publishes or invokes a service. If the installation or running ROS graph is absent, print
-`SKIP E_PREREQUISITE` and exit 77. If prerequisites are present, use a bounded timeout to discover
-the expected Isaac topic or observe one `/clock` message; success exits 0, while discovery failure
-is a non-77 failure. `tests/test_isaac_host.bash` covers PASS, SKIP, and FAIL distinctly.
+never publishes or invokes a service. Exit 77 with `SKIP E_PREREQUISITE` only when installation or
+host prerequisites are absent, such as no Isaac root/launcher, non-x86_64 host, or unavailable
+NVIDIA prerequisite. An installed but unreadable/incompatible version is FAIL. Once a compatible
+installation, NVIDIA, launcher, and version prerequisites exist, an absent ROS graph/topic or a
+timed-out `/clock` observation is also blocking non-77 FAIL. Success exits 0.
+`tests/test_isaac_host.bash` covers these PASS, allowed-SKIP, incompatible-version FAIL, missing-graph
+FAIL, and missing-topic FAIL cases distinctly.
 
 - [ ] **Step 4: Verify GREEN and commit**
 
@@ -878,6 +973,10 @@ Run:
 
 ```bash
 bash -n scripts/doctor.bash scripts/launch_isaac_sim.sh scripts/check_isaac_host.bash
+chmod 0755 scripts/doctor.bash scripts/launch_isaac_sim.sh scripts/check_isaac_host.bash
+test -x scripts/doctor.bash
+test -x scripts/launch_isaac_sim.sh
+test -x scripts/check_isaac_host.bash
 bash tests/test_doctor.bash
 bash tests/test_isaac_host.bash
 git diff --check
@@ -886,8 +985,9 @@ git add scripts/doctor.bash scripts/launch_isaac_sim.sh scripts/check_isaac_host
 git commit -m "feat: add core and host Isaac diagnostics"
 ```
 
-Expected: doctor tests pass with compact output; Isaac acceptance reports PASS, explicit SKIP 77,
-or blocking FAIL correctly, and no install/download/simulator-control/hardware-control command exists.
+Expected: doctor tests pass with compact output; all three scripts are 0755; Isaac acceptance uses
+SKIP 77 only for absent installation/host prerequisites and blocking FAIL for incompatible installed
+state or absent graph/topic; no install/download/simulator-control/hardware-control command exists.
 
 ---
 
@@ -915,6 +1015,7 @@ or blocking FAIL correctly, and no install/download/simulator-control/hardware-c
 - Modify: `docs/tutorials/shared/cube-pick-v1-dataset-policy-interface.md`
 - Modify: `docs/tutorials/shared/later-milestones.md`
 - Modify: `docs/tutorials/shared/glossary.md`
+- Modify: `docs/tutorials/shared/troubleshooting.md`
 - Modify: `docs/troubleshooting/2026-07-07-isaacsim-ros2-bridge-fastdds.md`
 - Create: `tests/fixtures/core-deleted-paths.txt`
 - Modify: `scripts/check_dev_workflow.sh`
@@ -940,6 +1041,20 @@ Also fail when `README.md` or `docs/tutorials/**/*.md` contains `/home/ahrism`, 
 `full-dev`, `A0912`, or `Dockerfile.doosan`. Scan active README/docs while explicitly excluding
 historical governance material under `docs/superpowers/**`; permit branch-governance names such as
 `doosan-tutorial`, but reject live vendor runtime paths/services/targets.
+
+Make the 31-path fixture a permanent part of `tests/test_static_contract.bash`:
+
+```bash
+while IFS= read -r path; do
+  test ! -e "$path" || fail "deleted core path still exists: $path"
+  if git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
+    fail "deleted core path remains in index: $path"
+  fi
+done < tests/fixtures/core-deleted-paths.txt
+```
+
+This permanently covers both top-level tutorial documents as well as all other 29 entries. Test
+files are invoked with `bash`; they do not need executable mode.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -998,6 +1113,8 @@ that Days 5-10 live on the two tutorial branches. Replace absolute repository pa
 `official-tutorial-map.md`, `environment-setup.md`, and `glossary.md` around Days 1-4 only.
 Remove A0912-specific dataset and later-milestone content from the two shared files while retaining
 their exact originals in the preservation tag for `doosan-tutorial` restoration.
+Audit and rewrite `docs/tutorials/shared/troubleshooting.md` explicitly if it retains removed
+runtime paths or Days 5-10-only guidance.
 
 Explicitly remove Day 4 README's next-link to the deleted Day 5/two-week index. Replace every
 `/home/ahrism` occurrence in retained Days 1-4 and shared docs. Rewrite the FastDDS troubleshooting
@@ -1011,17 +1128,17 @@ Replace `scripts/check_dev_workflow.sh` with a wrapper:
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-exec tests/test_static_contract.bash
+exec bash tests/test_static_contract.bash
 ```
 
 This ordering is mandatory: `tests/run_all.bash` does not exist until Task 8.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
-Run:
+First verify filesystem deletion and preservation before staging; do not run the permanent static
+test yet because deleted paths remain in the Git index until exact staging:
 
 ```bash
-bash tests/test_static_contract.bash
 while IFS= read -r path; do
   test ! -e "$path"
   git cat-file -e "migration/pre-split-2026-07-14:$path"
@@ -1043,9 +1160,15 @@ git add README.md docs/tutorials/README.md \
   docs/tutorials/shared/official-tutorial-map.md \
   docs/tutorials/shared/cube-pick-v1-dataset-policy-interface.md \
   docs/tutorials/shared/later-milestones.md docs/tutorials/shared/glossary.md \
+  docs/tutorials/shared/troubleshooting.md \
   docs/troubleshooting/2026-07-07-isaacsim-ros2-bridge-fastdds.md \
   scripts/check_dev_workflow.sh tests/test_static_contract.bash \
   tests/fixtures/core-deleted-paths.txt
+bash tests/test_static_contract.bash
+while IFS= read -r path; do
+  ! git ls-files --error-unmatch -- "$path" >/dev/null 2>&1
+done < tests/fixtures/core-deleted-paths.txt
+test -x scripts/check_dev_workflow.sh
 git commit -m "refactor: keep main vendor neutral"
 ```
 
@@ -1093,7 +1216,8 @@ Add a static assertion that the workflow contains `linux/amd64`, `linux/arm64`, 
 `tests/run_all.bash`.
 
 Now, and only now, change `scripts/check_dev_workflow.sh` from the Task 7 static-test wrapper to
-`exec tests/run_all.bash`.
+`exec bash tests/run_all.bash`. Keep the wrapper executable; `tests/run_all.bash` and the individual
+test files are invoked with Bash and do not need executable mode.
 
 - [ ] **Step 2: Verify RED**
 
@@ -1103,19 +1227,26 @@ Expected: FAIL because `.github/workflows/core-environment.yml` is missing.
 
 - [ ] **Step 3: Add CI jobs**
 
-The workflow must run on pull requests and pushes to `main`. Pin setup dependencies to these exact
-full commits and pin Compose to the supported minimum series:
+The workflow must run on pull requests and pushes to `main` with `runs-on: ubuntu-24.04`. Pin every
+setup action and its execution substrate to these exact observed values:
 
 ```yaml
-actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
-docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
-docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
-docker/setup-compose-action@2fe291b7677a45ee1269ec56a42604c143505e7e
-with:
-  version: v2.30.3
+- uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+- uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+  with:
+    image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
+    platforms: arm64
+- uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+  with:
+    version: v0.35.0
+    driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+- uses: docker/setup-compose-action@2fe291b7677a45ee1269ec56a42604c143505e7e
+  with:
+    version: v2.30.3
 ```
 
-After setup, assert `docker compose version --short` is exactly `2.30.3`, run
+These are the controller-observed CI substrate values, not floating examples. After setup, assert
+`docker compose version --short` is exactly `2.30.3`, run
 `tests/test_image_indexes.bash`, and run the unified tests. Set up QEMU for arm64 and Buildx
 explicitly. Build `ros-python-dev` separately for `linux/amd64` and `linux/arm64`, load each local
 single-platform image without publishing, then run each image with its matching `--platform`.
@@ -1145,6 +1276,7 @@ Run:
 
 ```bash
 bash tests/run_all.bash
+test -x scripts/check_dev_workflow.sh
 git diff --check
 git add tests/run_all.bash tests/test_static_contract.bash \
   scripts/check_dev_workflow.sh .github/workflows/core-environment.yml
@@ -1183,12 +1315,45 @@ test "$(sha256sum "$BACKUP/manifest.txt" | awk '{print $1}')" = \
   39478896d14aefd7c1f40b46a3117974d45917811d90c108818ccc5cb2df92da
 test "$(sha256sum "$BACKUP/user-damin.patch" | awk '{print $1}')" = \
   a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
-test "$(sha256sum "$ROOT/Dockerfile.doosan" | awk '{print $1}')" = \
-  d236f98f1185458b52aab3d6ed49b8eb208a87afcc8662739e4841951422a4a9
-test "$(sha256sum "$ROOT/scripts/check_dev_workflow.sh" | awk '{print $1}')" = \
-  06b0a687b041b3b9a4f66be1b5ca84e606ae1e7a155c3e136a315a62aa64235f
-test "$(sha256sum "$ROOT/docs/[리버트론]OpenArm(AA-K1)_User Manual_한글판.pdf" | awk '{print $1}')" = \
-  6b35dd70c72ac76eed385adfedb9936d13d514fec74e4a8811aa321c888560e6
+
+manifest_value() { sed -n "s/^$2=//p" "$1"; }
+verify_worktree_manifest() {
+  local manifest="$1" manifest_sha="$2" wt expected actual line record path file_sha
+  test "$(sha256sum "$manifest" | awk '{print $1}')" = "$manifest_sha"
+  wt="$(manifest_value "$manifest" worktree)"
+  expected="$(manifest_value "$manifest" head)"
+  test "$(git -C "$wt" rev-parse HEAD)" = "$expected"
+  expected="$(manifest_value "$manifest" status_porcelain_v1_z_sha256)"
+  actual="$(git -C "$wt" status --porcelain=v1 -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" tracked_binary_diff_sha256)"
+  actual="$(git -C "$wt" diff --binary | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" untracked_paths_z_sha256)"
+  actual="$(git -C "$wt" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  while IFS= read -r line; do
+    case "$line" in
+      tracked_sha256=*|untracked_sha256=*)
+        record="${line%%  *}"
+        path="${line#*  }"
+        file_sha="${record#*=}"
+        test -f "$wt/$path"
+        test "$(sha256sum "$wt/$path" | awk '{print $1}')" = "$file_sha"
+        ;;
+    esac
+  done < "$manifest"
+}
+
+test "$(manifest_value "$BACKUP/root-worktree.manifest" head)" = \
+  744a8a9bda98dd6b7fd50a0703bf6fefab981bc5
+test "$(manifest_value "$BACKUP/feature-worktree.manifest" head)" = \
+  bbce9bdb91a76ed57755542586bfcd6e0af61ba9
+verify_worktree_manifest "$BACKUP/root-worktree.manifest" \
+  ebd801615fe1d523757048ba1f6f884f57956af7181a74f99cc3e7fc3a0e3780
+verify_worktree_manifest "$BACKUP/feature-worktree.manifest" \
+  09a318b77f6447e78ca9801db3f4ba7583f54c5dd0edaeaa5ea07fd3190eeb5e
+test -f "$ROOT/user-ws/damin/tutorial-7.py"
 git -C "$ROOT" status --short --branch
 git -C "$FEATURE" status --short --branch
 while IFS= read -r path; do
@@ -1197,8 +1362,10 @@ while IFS= read -r path; do
 done < tests/fixtures/core-deleted-paths.txt
 ```
 
-Expected: all hashes and all 31 tag blobs match; both protected dirty-worktree inventories remain
-present and unchanged. Any mismatch stops integration without cleanup/reset/stash.
+Expected: both external-manifest hashes, root HEAD `744a8a9b...`, feature HEAD `bbce9bdb...`, both
+NUL-delimited status/untracked-list hashes, both binary-diff hashes, every per-file hash (including
+the PDF and `user-ws/damin/tutorial-7.py`), and all 31 tag blobs match. Any mismatch stops
+integration without cleanup/reset/stash.
 
 - [ ] **Step 2: Repeat complete core and both-platform acceptance**
 
@@ -1207,9 +1374,23 @@ Run:
 ```bash
 bash tests/run_all.bash
 bash tests/test_image_indexes.bash
-test "$(docker compose version --short)" = 2.30.3
+compose_version="$(docker compose version --short)"
+compose_version="${compose_version#v}"
+test "$(printf '%s\n' 2.30.0 "$compose_version" | sort -V | head -n1)" = 2.30.0
 docker compose --env-file docker/versions.env --env-file .env.example \
   --profile ai config -q
+
+ROS_PIN='ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f'
+if test "$(uname -m)" = aarch64; then
+  printf 'arm64 runtime preflight: native\n'
+elif docker run --rm --platform linux/arm64 "$ROS_PIN" bash -lc true; then
+  printf 'arm64 runtime preflight: existing QEMU/binfmt\n'
+else
+  printf '%s\n' \
+    'HOLD E_PREREQUISITE: no native/QEMU arm64 execution; request explicit authority before privileged binfmt registration' >&2
+  exit 1
+fi
+
 docker buildx build --platform linux/amd64 --target ros-python-dev \
   --load -t nexus-ros-core:amd64 .
 docker buildx build --platform linux/arm64 --target ros-python-dev \
@@ -1233,7 +1414,10 @@ test -z "$(git status --short)"
 ```
 
 Expected: both exact OCI indexes and both runtime architectures pass exact Python 3.12, uv 0.8.3,
-non-root developer, Jazzy, demo package, and talker/listener checks. The core worktree is clean.
+non-root developer, Jazzy, demo package, and talker/listener checks. Local Compose is semantically
+at least 2.30.0; exact 2.30.3 is a CI-only assertion. If native/QEMU arm64 execution is absent—as
+on the current host—HOLD before any build/merge and request explicit authority for privileged
+binfmt setup. Never auto-register binfmt; Task 8 CI remains the authoritative arm64 runtime smoke.
 
 - [ ] **Step 3: Record host Isaac acceptance or an explicit deferred acceptance**
 
@@ -1253,8 +1437,9 @@ esac
 ```
 
 Expected: actual topic discovery or one `/clock` observation passes when the host is available.
-Unavailable Isaac is recorded as SKIP with the exact rerun command and is not reported as passed;
-discovery failure with prerequisites present blocks integration. No simulator install/start or
+Absent installation/host prerequisites are recorded as SKIP with the exact rerun command and are
+not reported as passed. Once compatible installation/NVIDIA/version prerequisites exist, absent
+graph/topic or discovery timeout is blocking non-77 FAIL. No simulator install/start or
 hardware/motion command is run.
 
 - [ ] **Step 4: Create the exact clean `main` worktree and merge locally without push**
