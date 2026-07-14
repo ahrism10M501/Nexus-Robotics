@@ -153,7 +153,7 @@ assert_contains README.md '`--core`'
 assert_contains README.md '`bash tests/run_all.bash --full`'
 assert_contains README.md '14.4 GB'
 assert_contains README.md 'amd64'
-assert_contains README.md 'arm64'
+assert_contains README.md 'ARM64 runtime 지원을 의미하지 않습니다.'
 
 for check_path in \
   tests/test_static_contract.bash tests/test_init.bash tests/test_profiles.bash \
@@ -276,13 +276,13 @@ mapfile -t job_ids < <(
     }
   ' "$workflow"
 )
-expected_jobs=(static build-amd64 build-arm64)
+expected_jobs=(static build-amd64)
 test "${job_ids[*]}" = "${expected_jobs[*]}" || \
   fail "unexpected workflow jobs: ${job_ids[*]}"
-test "$(grep -Fxc '    runs-on: ubuntu-24.04' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '    runs-on: ubuntu-24.04' "$workflow")" -eq 2 || \
   fail 'every workflow job must use ubuntu-24.04'
-test "$(grep -Fxc '    needs: static' "$workflow")" -eq 2 || \
-  fail 'both platform jobs must need static'
+test "$(grep -Fxc '    needs: static' "$workflow")" -eq 1 || \
+  fail 'the amd64 job must need static'
 test "$(grep -Fxc '      - main' "$workflow")" -eq 2 || \
   fail 'workflow must target main for exactly push and pull_request'
 assert_contains "$workflow" '  pull_request:'
@@ -293,7 +293,6 @@ assert_contains "$workflow" '  DOCKER_BUILDKIT: "1"'
 assert_not_contains "$workflow" 'pull_request_target'
 
 checkout='actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5'
-qemu='docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130'
 buildx='docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f'
 compose='docker/setup-compose-action@2fe291b7677a45ee1269ec56a42604c143505e7e'
 
@@ -308,10 +307,8 @@ extract_job() {
 
 static_job="$contract_tmp/static.job"
 amd64_job="$contract_tmp/amd64.job"
-arm64_job="$contract_tmp/arm64.job"
 extract_job static "$static_job"
 extract_job build-amd64 "$amd64_job"
-extract_job build-arm64 "$arm64_job"
 
 assert_ordered() {
   local file="$1"
@@ -365,14 +362,6 @@ assert_action_block() {
         '          buildkitd-flags: --debug') "$actual" || \
         fail "Buildx inputs are not attached to Buildx in $job_file"
       ;;
-    qemu)
-      diff -u <(printf '%s\n' \
-        "      - uses: $qemu" \
-        '        with:' \
-        '          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0' \
-        '          platforms: arm64') "$actual" || \
-        fail "QEMU inputs are not attached to QEMU in $job_file"
-      ;;
     compose)
       diff -u <(printf '%s\n' \
         "      - uses: $compose" \
@@ -384,7 +373,7 @@ assert_action_block() {
   rm -f "$actual"
 }
 
-for job_file in "$static_job" "$amd64_job" "$arm64_job"; do
+for job_file in "$static_job" "$amd64_job"; do
   assert_action_block "$job_file" "$checkout" checkout
   assert_action_block "$job_file" "$buildx" buildx
   test "$(grep -Fxc '    runs-on: ubuntu-24.04' "$job_file")" -eq 1 || \
@@ -396,35 +385,22 @@ for job_file in "$static_job" "$amd64_job" "$arm64_job"; do
 done
 test "$(grep -Fxc '    needs: static' "$static_job")" -eq 0 || \
   fail 'static job cannot depend on itself'
-for job_file in "$amd64_job" "$arm64_job"; do
-  test "$(grep -Fxc '    needs: static' "$job_file")" -eq 1 || \
-    fail "$job_file must depend on static exactly once"
-  test "$(grep -Ec '^        timeout-minutes: [0-9]+$' "$job_file")" -eq 1 || \
-    fail "$job_file must bound its runtime smoke step exactly once"
-done
+test "$(grep -Fxc '    needs: static' "$amd64_job")" -eq 1 || \
+  fail 'the amd64 job must depend on static exactly once'
+test "$(grep -Ec '^        timeout-minutes: [0-9]+$' "$amd64_job")" -eq 1 || \
+  fail 'the amd64 job must bound its runtime smoke step exactly once'
 test "$(grep -Ec '^        timeout-minutes: [0-9]+$' "$static_job")" -eq 0 || \
   fail 'static job cannot contain a runtime-smoke timeout'
 
 amd64_smoke_step="$contract_tmp/amd64-smoke.step"
-arm64_smoke_step="$contract_tmp/arm64-smoke.step"
 extract_named_step "$amd64_job" 'Smoke amd64 core image' "$amd64_smoke_step"
-extract_named_step "$arm64_job" 'Smoke arm64 core image' "$arm64_smoke_step"
 diff -u <(printf '%s\n' \
   '      - name: Smoke amd64 core image' \
   '        timeout-minutes: 10' \
   '        run: bash tests/smoke_core_image.bash linux/amd64 nexus-core-ci:amd64 x86_64') \
   "$amd64_smoke_step" || fail 'amd64 timeout/run are not attached to the smoke step'
-diff -u <(printf '%s\n' \
-  '      - name: Smoke arm64 core image' \
-  '        timeout-minutes: 15' \
-  '        run: bash tests/smoke_core_image.bash linux/arm64 nexus-core-ci:arm64 aarch64') \
-  "$arm64_smoke_step" || fail 'arm64 timeout/run are not attached to the smoke step'
 assert_action_block "$static_job" "$compose" compose
-assert_action_block "$arm64_job" "$qemu" qemu
-assert_not_contains "$static_job" "$qemu"
-assert_not_contains "$amd64_job" "$qemu"
 assert_not_contains "$amd64_job" "$compose"
-assert_not_contains "$arm64_job" "$compose"
 assert_not_contains "$static_job" 'docker buildx build'
 
 assert_ordered "$static_job" \
@@ -440,74 +416,50 @@ assert_ordered "$amd64_job" \
   'docker image inspect --format '\''{{.Os}}/{{.Architecture}}'\'' nexus-core-ci:amd64' \
   'bash tests/smoke_core_image.bash linux/amd64 nexus-core-ci:amd64 x86_64' \
   'if: failure()' 'df -h' 'docker system df'
-assert_ordered "$arm64_job" \
-  'docker system prune --all --force --volumes' \
-  "uses: $checkout" "uses: $qemu" "uses: $buildx" \
-  'docker buildx build --pull --platform linux/arm64 --target ros-python-dev --load --tag nexus-core-ci:arm64 .' \
-  'docker buildx prune --all --force' \
-  'docker image inspect --format '\''{{.Os}}/{{.Architecture}}'\'' nexus-core-ci:arm64' \
-  'bash tests/smoke_core_image.bash linux/arm64 nexus-core-ci:arm64 aarch64' \
-  'if: failure()' 'df -h' 'docker system df'
-
 mapfile -t uses_values < <(sed -n 's/^[[:space:]]*- uses: //p' "$workflow")
-test "${#uses_values[@]}" -eq 8 || fail 'workflow must have exactly eight uses entries'
-test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$checkout")" -eq 3 || \
-  fail 'checkout action count is not three'
-test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$buildx")" -eq 3 || \
-  fail 'Buildx action count is not three'
-test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$qemu")" -eq 1 || \
-  fail 'QEMU action count is not one'
+test "${#uses_values[@]}" -eq 5 || fail 'workflow must have exactly five uses entries'
+test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$checkout")" -eq 2 || \
+  fail 'checkout action count is not two'
+test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$buildx")" -eq 2 || \
+  fail 'Buildx action count is not two'
 test "$(printf '%s\n' "${uses_values[@]}" | grep -Fxc "$compose")" -eq 1 || \
   fail 'Compose action count is not one'
 for action_ref in "${uses_values[@]}"; do
   case "$action_ref" in
-    "$checkout"|"$qemu"|"$buildx"|"$compose") ;;
+    "$checkout"|"$buildx"|"$compose") ;;
     *) fail "unapproved action reference: $action_ref" ;;
   esac
 done
-test "$(grep -Fxc '          persist-credentials: false' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '          persist-credentials: false' "$workflow")" -eq 2 || \
   fail 'every checkout must disable persisted credentials'
-test "$(grep -Fxc '          version: v0.35.0' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '          version: v0.35.0' "$workflow")" -eq 2 || \
   fail 'every Buildx setup must pin v0.35.0'
-test "$(grep -Fxc '          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '          driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f' "$workflow")" -eq 2 || \
   fail 'every Buildx setup must pin the approved BuildKit image'
-test "$(grep -Fxc '          buildkitd-flags: --debug' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '          buildkitd-flags: --debug' "$workflow")" -eq 2 || \
   fail 'every Buildx setup must reset insecure default entitlements'
-assert_contains "$workflow" \
-  '          image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0'
-assert_contains "$workflow" '          platforms: arm64'
 assert_contains "$workflow" '          version: v2.30.3'
 assert_contains "$workflow" \
   'test "$(docker compose version --short)" = '\''2.30.3'\'''
 
-qemu_line="$(grep -nF -- "uses: $qemu" "$workflow" | cut -d: -f1)"
-arm_buildx_line="$(grep -nF -- "uses: $buildx" "$workflow" | tail -n1 | cut -d: -f1)"
-test "$qemu_line" -lt "$arm_buildx_line" || fail 'QEMU setup must precede arm64 Buildx setup'
-
 assert_contains "$workflow" \
   'docker buildx build --pull --platform linux/amd64 --target ros-python-dev --load --tag nexus-core-ci:amd64 .'
-assert_contains "$workflow" \
-  'docker buildx build --pull --platform linux/arm64 --target ros-python-dev --load --tag nexus-core-ci:arm64 .'
-test "$(grep -Fxc '          docker buildx prune --all --force' "$workflow")" -eq 2 || \
-  fail 'each platform job must prune Buildx cache after loading its image'
+test "$(grep -Fxc '          docker buildx prune --all --force' "$workflow")" -eq 1 || \
+  fail 'the amd64 job must prune Buildx cache after loading its image'
 assert_contains "$workflow" \
   'test "$(docker image inspect --format '\''{{.Os}}/{{.Architecture}}'\'' nexus-core-ci:amd64)" = '\''linux/amd64'\'''
 assert_contains "$workflow" \
-  'test "$(docker image inspect --format '\''{{.Os}}/{{.Architecture}}'\'' nexus-core-ci:arm64)" = '\''linux/arm64'\'''
-assert_contains "$workflow" \
   'bash tests/smoke_core_image.bash linux/amd64 nexus-core-ci:amd64 x86_64'
-assert_contains "$workflow" \
-  'bash tests/smoke_core_image.bash linux/arm64 nexus-core-ci:arm64 aarch64'
 assert_contains "$workflow" 'bash tests/run_all.bash --checks'
-test "$(grep -Fxc '          docker system prune --all --force --volumes' "$workflow")" -eq 3 || \
+test "$(grep -Fxc '          docker system prune --all --force --volumes' "$workflow")" -eq 2 || \
   fail 'every ephemeral job must remove preinstalled Docker data before setup'
-test "$(grep -Ec '^    timeout-minutes: [0-9]+$' "$workflow")" -eq 3 || \
+test "$(grep -Ec '^    timeout-minutes: [0-9]+$' "$workflow")" -eq 2 || \
   fail 'every workflow job must have a timeout'
-test "$(grep -Ec '^        timeout-minutes: [0-9]+$' "$workflow")" -eq 2 || \
+test "$(grep -Ec '^        timeout-minutes: [0-9]+$' "$workflow")" -eq 1 || \
   fail 'every runtime smoke step must have a timeout'
-test "$(grep -Fxc '          df -h' "$workflow")" -eq 2 || \
+test "$(grep -Fxc '          df -h' "$workflow")" -eq 1 || \
   fail 'platform failure diagnostics must include df -h'
-test "$(grep -Fxc '          docker system df' "$workflow")" -eq 2 || \
+test "$(grep -Fxc '          docker system df' "$workflow")" -eq 1 || \
   fail 'platform failure diagnostics must include docker system df'
 
 # Match risky constructs narrowly so safe YAML terms remain usable.
@@ -517,6 +469,7 @@ fi
 for forbidden in \
   'docker/login-action' 'docker login' 'docker push' '--push' 'push: true' \
   'actions/upload-artifact' 'actions/download-artifact' 'docker.sock' '--privileged' \
+  'docker/setup-qemu-action' 'tonistiigi/binfmt' 'build-arm64' 'linux/arm64' \
   '--device' '/dev/' '--network=host' '--network host' '--net=host' \
   '--allow security.insecure' '--allow=security.insecure' \
   '--allow network.host' '--allow=network.host' \
