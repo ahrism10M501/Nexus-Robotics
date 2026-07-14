@@ -1,0 +1,16 @@
+.git
+.github
+.env
+.worktrees
+.superpowers
+build
+install
+log
+data
+checkpoints
+user-ws
+__pycache__
+.pytest_cache
+.ruff_cache
+.vscode
+*.pyc

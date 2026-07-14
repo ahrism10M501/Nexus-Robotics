@@ -19,6 +19,7 @@ checkpoints/*
 
 # Local secrets
 .env
+.xauth-*
 
 /.superpowers
 /.worktrees/
