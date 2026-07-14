@@ -1003,10 +1003,16 @@ state or absent graph/topic; no install/download/simulator-control/hardware-cont
 - Delete: `docs/tutorials/day-05-*` through `docs/tutorials/day-10-*`
 - Modify: `README.md`
 - Modify: `docs/tutorials/README.md`
+- Modify: `docs/tutorials/day-01-isaac-sim-basics/concepts.md`
 - Modify: `docs/tutorials/day-01-isaac-sim-basics/hands-on.md`
+- Modify: `docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/checkpoint.md`
 - Modify: `docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/hands-on.md`
+- Modify: `docs/tutorials/day-03-python-scripting-minimum-loop/checkpoint.md`
+- Modify: `docs/tutorials/day-03-python-scripting-minimum-loop/concepts.md`
 - Modify: `docs/tutorials/day-03-python-scripting-minimum-loop/hands-on.md`
 - Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md`
+- Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/checkpoint.md`
+- Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/concepts.md`
 - Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/hands-on.md`
 - Modify: `docs/tutorials/shared/environment-setup.md`
 - Modify: `docs/tutorials/shared/README.md`
@@ -1036,10 +1042,29 @@ docker/*doosan*
 docs/tutorials/day-05-*/** through day-10-*/**
 ```
 
-Also fail when `README.md` or `docs/tutorials/**/*.md` contains `/home/ahrism`, `doosan-dev`,
-`full-dev`, `A0912`, or `Dockerfile.doosan`. Scan active README/docs while explicitly excluding
-historical governance material under `docs/superpowers/**`; permit branch-governance names such as
-`doosan-tutorial`, but reject live vendor runtime paths/services/targets.
+Also fail, case-insensitively, when active `README.md` or Markdown under `docs/` contains a live
+vendor/runtime token matching:
+
+```text
+/home/ahrism
+a0912
+doosan[-_](dev|build|up|shell|check)
+full[-_](dev|build|up|shell|check)
+bootstrap_doosan
+doosanrobot
+DSR_ROBOT2
+isaac_moveit
+IsaacSim-ros_workspaces
+Dockerfile\.(doosan|isaac-moveit)
+\.devcontainer/doosan
+```
+
+Explicitly exclude historical governance material under `docs/superpowers/**`; permit branch names
+such as `doosan-tutorial`, but reject live vendor paths, commands, targets, and service identifiers.
+In retained Day 1-4 and `docs/tutorials/shared/` Markdown, reject `Day`/`Days` 5-10 and
+`day-05` through `day-10` path references so core material cannot imply that a deleted follow-on
+lesson remains local. Only `docs/tutorials/README.md` may describe the two matching tutorial
+branches and their Days 5-10 ownership.
 
 Make the 31-path fixture a permanent part of `tests/test_static_contract.bash`:
 
@@ -1119,6 +1144,9 @@ Explicitly remove Day 4 README's next-link to the deleted Day 5/two-week index. 
 `/home/ahrism` occurrence in retained Days 1-4 and shared docs. Rewrite the FastDDS troubleshooting
 host value to `$REPO_ROOT/config/fastdds.xml`. Document the non-destructive Isaac acceptance command,
 including PASS, exit-77 SKIP when Isaac is absent, and blocking FAIL when prerequisites exist.
+Generalize the numbered follow-on references in the six retained `concepts.md`/`checkpoint.md`
+files added to this task: use `후속 로봇 튜토리얼 브랜치`, `후속 실습`, or an equivalent
+branch-neutral phrase. Do not copy their future-task material into core.
 
 Replace `scripts/check_dev_workflow.sh` with a wrapper:
 
@@ -1142,18 +1170,25 @@ while IFS= read -r path; do
   test ! -e "$path"
   git cat-file -e "migration/pre-split-2026-07-14:$path"
 done < tests/fixtures/core-deleted-paths.txt
-! rg -n '/home/ahrism|doosan-dev|full-dev|A0912|Dockerfile\.doosan|IsaacSim-ros_workspaces' \
+! rg -n -i \
+  '/home/ahrism|a0912|doosan[-_](dev|build|up|shell|check)|full[-_](dev|build|up|shell|check)|bootstrap_doosan|doosanrobot|DSR_ROBOT2|isaac_moveit|IsaacSim-ros_workspaces|Dockerfile\.(doosan|isaac-moveit)|\.devcontainer/doosan' \
   README.md docs --glob '*.md' --glob '!docs/superpowers/**'
-! rg -n 'day-05|2-week-isaac-ros2-a0912' \
-  docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md
+! rg -n -i 'Days? ([5-9]|10)([^0-9]|$)|day-(0[5-9]|10)([^0-9]|$)' \
+  docs/tutorials/day-0{1,2,3,4}-*/ docs/tutorials/shared/ --glob '*.md'
 git diff --check
 mapfile -t deleted_paths < tests/fixtures/core-deleted-paths.txt
 git add -A -- "${deleted_paths[@]}"
 git add README.md docs/tutorials/README.md \
+  docs/tutorials/day-01-isaac-sim-basics/concepts.md \
   docs/tutorials/day-01-isaac-sim-basics/hands-on.md \
+  docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/checkpoint.md \
   docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/hands-on.md \
+  docs/tutorials/day-03-python-scripting-minimum-loop/checkpoint.md \
+  docs/tutorials/day-03-python-scripting-minimum-loop/concepts.md \
   docs/tutorials/day-03-python-scripting-minimum-loop/hands-on.md \
   docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md \
+  docs/tutorials/day-04-ros2-bridge-observation-pipeline/checkpoint.md \
+  docs/tutorials/day-04-ros2-bridge-observation-pipeline/concepts.md \
   docs/tutorials/day-04-ros2-bridge-observation-pipeline/hands-on.md \
   docs/tutorials/shared/README.md docs/tutorials/shared/environment-setup.md \
   docs/tutorials/shared/official-tutorial-map.md \
