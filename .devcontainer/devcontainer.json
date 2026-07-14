@@ -4,7 +4,7 @@
   "service": "ros2_dev",
   "workspaceFolder": "/workspace",
   "shutdownAction": "stopCompose",
-  "remoteUser": "root",
+  "remoteUser": "developer",
   "customizations": {
     "vscode": {
       "extensions": [

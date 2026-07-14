@@ -27,4 +27,19 @@ assert_contains .dockerignore 'data'
 assert_contains .dockerignore 'checkpoints'
 assert_contains .gitignore '.env'
 assert_contains .gitignore '.xauth-*'
+assert_contains .devcontainer/devcontainer.json '"remoteUser": "developer"'
+assert_not_contains .devcontainer/devcontainer.json '"remoteUser": "root"'
+for target in 'AS ros-base' 'AS ros-dev' 'AS ros-python-dev' 'AS ros-ai-dev'; do
+  assert_contains Dockerfile "$target"
+done
+assert_contains Dockerfile 'USER developer'
+assert_contains Dockerfile 'COPY --from=uv-bin /uv /uvx /usr/local/bin/'
+assert_contains Dockerfile 'ros-jazzy-desktop'
+assert_contains Dockerfile 'uv pip sync --require-hashes'
+assert_contains Dockerfile 'uv pip check'
+assert_not_contains Dockerfile 'ARG DEVELOPER_NAME'
+assert_not_contains Dockerfile 'curl -LsSf https://astral.sh/uv/install.sh'
+for vendor in DOOSAN OPENARM ISAAC_ROS; do
+  assert_not_contains Dockerfile "$vendor"
+done
 printf 'static core contract passed\n'
