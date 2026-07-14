@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export NEXUS_ENV_FILE="$ROOT/.env"
 source "$ROOT/scripts/lib/config.bash"
 source "$ROOT/scripts/lib/profile.bash"
 cd "$ROOT"

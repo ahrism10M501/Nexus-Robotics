@@ -63,6 +63,14 @@ before="$(sha256sum "$root/.env")"
 init_root "$root"
 test "$before" = "$(sha256sum "$root/.env")" || fail 'init overwrote an existing .env'
 
+# Direct library callers retain the explicit fixture hook used by tests and CI.
+root="$(new_root)"
+override="$tmp/library-override.env"
+rm "$root/.env" "$override" 2>/dev/null || true
+(ROOT="$root"; NEXUS_ENV_FILE="$override"; nexus_init_env; nexus_validate_env)
+cmp -s "$root/.env.example" "$override" || fail 'direct NEXUS_ENV_FILE hook was ignored'
+[[ ! -e "$root/.env" ]] || fail 'direct NEXUS_ENV_FILE hook wrote ROOT/.env'
+
 # Runtime identity is explicit: absent, empty, zero/root, non-numeric, and negative all fail.
 for key in LOCAL_UID LOCAL_GID; do
   root="$(new_root)"

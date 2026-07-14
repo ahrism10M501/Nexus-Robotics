@@ -38,6 +38,10 @@ _nexus_validate_repo_path() {
     _nexus_profile_error "cannot canonicalize repository path: $path" || return 1
   _nexus_contained_path "$root_real" "$canonical" ||
     _nexus_profile_error "repository path escapes ROOT: $path" || return 1
+  if (($# == 3)); then
+    local -n resolved_path="$3"
+    resolved_path="$canonical"
+  fi
 }
 
 _nexus_split_list() {
@@ -94,7 +98,7 @@ _nexus_require_profile_key() {
 
 nexus_load_profile() {
   local profile_name="$1" root_real profiles_real requested profile_file
-  local line key value item
+  local line key value item doctor_path check_path
   local -A seen=() values=()
   local -a required_keys=(
     PROFILE_VERSION
@@ -185,8 +189,10 @@ nexus_load_profile() {
   for item in "${NEXUS_COMPOSE_FILES[@]}"; do
     _nexus_validate_repo_path "$item" "$root_real" || return 1
   done
-  _nexus_validate_repo_path "${NEXUS_DOCTOR_ARGV[0]}" "$root_real" || return 1
-  _nexus_validate_repo_path "${NEXUS_CHECK_ARGV[0]}" "$root_real" || return 1
+  _nexus_validate_repo_path "${NEXUS_DOCTOR_ARGV[0]}" "$root_real" doctor_path || return 1
+  _nexus_validate_repo_path "${NEXUS_CHECK_ARGV[0]}" "$root_real" check_path || return 1
+  NEXUS_DOCTOR_ARGV[0]="$doctor_path"
+  NEXUS_CHECK_ARGV[0]="$check_path"
 
   NEXUS_SERVICE="${values[SERVICE]}"
   service="$NEXUS_SERVICE"
