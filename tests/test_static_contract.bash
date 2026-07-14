@@ -7,12 +7,31 @@ source tests/helpers/assert.bash
 assert_file tests/fixtures/core-deleted-paths.txt
 test "$(wc -l < tests/fixtures/core-deleted-paths.txt)" -eq 31 || \
   fail 'core deletion fixture must contain exactly 31 paths'
+fixture_hash="$(sha256sum tests/fixtures/core-deleted-paths.txt | awk '{print $1}')"
+test "$fixture_hash" = '59d358312370c1ec4c2ad1a5270a4e03f5a09dd2c016febd8f26bcabc1a3e73d' || \
+  fail 'core deletion fixture content changed'
+test "$(sort -u tests/fixtures/core-deleted-paths.txt | wc -l)" -eq 31 || \
+  fail 'core deletion fixture paths must be unique'
 while IFS= read -r path; do
   test ! -e "$path" || fail "deleted core path still exists: $path"
   if git ls-files --error-unmatch -- "$path" >/dev/null 2>&1; then
     fail "deleted core path remains in index: $path"
   fi
 done < tests/fixtures/core-deleted-paths.txt
+
+day2_hands_on=docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/hands-on.md
+day4_hands_on=docs/tutorials/day-04-ros2-bridge-observation-pipeline/hands-on.md
+fastdds_guide=docs/troubleshooting/2026-07-07-isaacsim-ros2-bridge-fastdds.md
+assert_contains README.md \
+  'Host bridge 실습에서는 `./run.sh dev`가 아니라 `./run.sh isaac-host-dev`를 사용합니다.'
+for guide in "$day2_hands_on" "$day4_hands_on"; do
+  assert_contains "$guide" './run.sh isaac-host-dev'
+  assert_not_contains "$guide" './run.sh dev'
+done
+assert_contains "$fastdds_guide" './run.sh isaac-host-down'
+assert_contains "$fastdds_guide" './run.sh isaac-host-up'
+assert_not_contains "$fastdds_guide" './run.sh down'
+assert_not_contains "$fastdds_guide" './run.sh up'
 
 while IFS= read -r tracked_path; do
   case "$tracked_path" in
