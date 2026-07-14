@@ -18,8 +18,11 @@
 - Base runtime is non-root and CPU/headless; GPU, GUI, host network, PID, IPC, and Docker socket are opt-in or absent.
 - Core Tier 1 targets are Ubuntu 24.04 on linux/amd64 and linux/arm64.
 - Docker Compose minimum is 2.30 with BuildKit.
-- Use `ROS_BASE_IMAGE=osrf/ros:jazzy-desktop@sha256:1d6f898b6ab77636c40f26298070ad3de5a9e06f0a71cf9ab066fd6b7838f151`.
-- Use `UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:88baae1f9fa298996f8313e44559163c535937406d217f1c8ac9d4b86a2020fd`.
+- Use `ROS_BASE_IMAGE=ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f`.
+- Use `UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36`.
+- Both immutable pins are OCI indexes that expose `linux/amd64` and `linux/arm64`.
+- The minimal ROS base is intentional; `ros-dev` must explicitly install `ros-jazzy-desktop`
+  to preserve Days 1-4, demo-node, and RViz capabilities.
 - Preserve AI direct pins: `torch==2.7.1`, `torchvision==0.22.1`, `diffusers==0.34.0`, `huggingface-hub==0.33.4`, `einops==0.8.1`, `timm==1.0.17`.
 - Public profile files are parsed as data with an allow-list; never `source` them as shell.
 - Use exact file staging for every commit so unrelated user changes remain unstaged.
@@ -35,8 +38,11 @@
 - `docker/versions.env`: immutable common image inputs only.
 - `docker/requirements/ai.in`: direct optional AI dependency pins.
 - `docker/requirements/ai.lock`: generated hash-locked dependency graph.
+- `scripts/generate_ai_lock.bash`: reproducibly generate and validate the universal AI lock.
 - `tests/helpers/assert.bash`: shared shell assertions.
 - `tests/test_static_contract.bash`: core ownership, pin, and file contract.
+- `tests/test_ai_lock.bash`: lock pins, markers, hashes, and two-platform wheel validation.
+- `tests/test_image_indexes.bash`: live OCI-index amd64/arm64 contract for both exact pins.
 
 ### Build and runtime
 
@@ -77,120 +83,107 @@
 
 ---
 
-### Task 1: Preserve current refs and create the isolated implementation worktree
+### Task 1: Verify the completed preservation baseline without replaying it
 
 **Files:**
-- Create outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/user-damin.patch`
-- Create outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/manifest.txt`
-- Create worktree: `/home/ahrism/workspace/ros2-dev/.worktrees/core-branch-migration`
+- Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/user-damin.patch`
+- Verify outside repository: `/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/manifest.txt`
+- Verify worktree: `/home/ahrism/workspace/ros2-dev/.worktrees/core-branch-migration`
 
 **Interfaces:**
-- Consumes: `main=6bb7f14`, approved commits on `user/damin`, dirty root worktree, dirty feature worktree.
-- Produces: tag `migration/pre-split-2026-07-14`, backup hashes, branch `refactor/core-branch-layout`, clean isolated worktree.
+- Consumes: the already-created preservation tag, backup, and isolated branch.
+- Produces: a read-only proof that execution may continue from
+  a forward descendant of `e6da3b444d501e2175517efb4c5b983b5fa5701b` without mutating either dirty worktree.
 
-- [ ] **Step 1: Record current state without mutation**
+Task 1 and the original immutable-input commit have already happened. Do not recreate the tag or
+worktree, amend `e6da3b4`, reset/rebase the branch, or replay the old Task 2 commit. All corrections
+below are forward-only commits.
 
-Run:
-
-```bash
-git status --short --branch
-git worktree list --porcelain
-git rev-parse main user/damin feat/team-shared-dev-env
-git diff --binary -- Dockerfile.doosan scripts/check_dev_workflow.sh
-sha256sum Dockerfile.doosan scripts/check_dev_workflow.sh \
-  'docs/[리버트론]OpenArm(AA-K1)_User Manual_한글판.pdf'
-```
-
-Expected: `main` is `6bb7f14`, `user/damin` is `bb0d497`, and the command reports but does not modify the known dirty files.
-
-- [ ] **Step 2: Create a local preservation tag**
+- [ ] **Step 1: Verify exact refs and the existing worktree**
 
 Run:
 
 ```bash
 test "$(git rev-parse main)" = "6bb7f14f748416f64712ce63103bea1b02997fea"
-git tag -a migration/pre-split-2026-07-14 6bb7f14 \
-  -m "Preserve repository state before robot branch split"
-git rev-parse migration/pre-split-2026-07-14^{}
+test "$(git rev-parse origin/main)" = "6bb7f14f748416f64712ce63103bea1b02997fea"
+test "$(git rev-parse migration/pre-split-2026-07-14^{})" = \
+  "6bb7f14f748416f64712ce63103bea1b02997fea"
+test "$(git rev-parse user/damin)" = \
+  "744a8a9bda98dd6b7fd50a0703bf6fefab981bc5"
+git merge-base --is-ancestor e6da3b444d501e2175517efb4c5b983b5fa5701b HEAD
+test "$(git branch --show-current)" = "refactor/core-branch-layout"
+test -z "$(git status --short)"
 ```
 
-Expected: tag resolves to `6bb7f14f748416f64712ce63103bea1b02997fea`.
+Expected: every assertion succeeds. The final clean-HEAD assertion applies before implementing
+this corrected plan; later tasks instead require only their intentional files to be dirty.
 
-- [ ] **Step 3: Save the tracked patch and checksums with `apply_patch`**
-
-Capture the exact output of the Step 1 `git diff --binary` and create
-`user-damin.patch` with `apply_patch`. Create `manifest.txt` with these exact fields and the
-fresh Step 1 values:
-
-```text
-source_branch=user/damin
-dirty_files_base_commit=bb0d49742fe96eba0a9492d770c92809a8b6a6ff
-main_commit=6bb7f14f748416f64712ce63103bea1b02997fea
-dockerfile_doosan_sha256=d236f98f1185458b52aab3d6ed49b8eb208a87afcc8662739e4841951422a4a9
-check_dev_workflow_sha256=06b0a687b041b3b9a4f66be1b5ca84e606ae1e7a155c3e136a315a62aa64235f
-openarm_manual_sha256=6b35dd70c72ac76eed385adfedb9936d13d514fec74e4a8811aa321c888560e6
-```
+- [ ] **Step 2: Verify the backup manifest and protected dirty content**
 
 Run:
 
 ```bash
-sha256sum /home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/user-damin.patch
+BACKUP=/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14
+ROOT=/home/ahrism/workspace/ros2-dev
+FEATURE="$ROOT/.worktrees/team-shared-dev-env"
+grep -Fx 'source_tip_commit=744a8a9bda98dd6b7fd50a0703bf6fefab981bc5' "$BACKUP/manifest.txt"
+grep -Fx 'dirty_files_base_commit=bb0d49742fe96eba0a9492d770c92809a8b6a6ff' "$BACKUP/manifest.txt"
+grep -Fx 'main_commit=6bb7f14f748416f64712ce63103bea1b02997fea' "$BACKUP/manifest.txt"
+test "$(sha256sum "$BACKUP/manifest.txt" | awk '{print $1}')" = \
+  39478896d14aefd7c1f40b46a3117974d45917811d90c108818ccc5cb2df92da
+test "$(sha256sum "$BACKUP/user-damin.patch" | awk '{print $1}')" = \
+  a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
+test "$(git -C "$ROOT" diff --binary -- Dockerfile.doosan \
+  scripts/check_dev_workflow.sh | sha256sum | awk '{print $1}')" = \
+  a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
+test "$(sha256sum "$ROOT/Dockerfile.doosan" | cut -d' ' -f1)" = \
+  d236f98f1185458b52aab3d6ed49b8eb208a87afcc8662739e4841951422a4a9
+test "$(sha256sum "$ROOT/scripts/check_dev_workflow.sh" | cut -d' ' -f1)" = \
+  06b0a687b041b3b9a4f66be1b5ca84e606ae1e7a155c3e136a315a62aa64235f
+test "$(sha256sum "$ROOT/docs/[리버트론]OpenArm(AA-K1)_User Manual_한글판.pdf" | cut -d' ' -f1)" = \
+  6b35dd70c72ac76eed385adfedb9936d13d514fec74e4a8811aa321c888560e6
+git -C "$ROOT" status --short --branch
+git -C "$FEATURE" status --short --branch
 ```
 
-Expected: the patch has a recorded checksum. Applicability is checked against the clean worktree
-in Step 4 rather than against the already-modified root worktree.
-
-- [ ] **Step 4: Create an isolated worktree from the approved design commit**
-
-**REQUIRED SUB-SKILL:** Use `superpowers:using-git-worktrees`.
-
-Run:
-
-```bash
-git worktree add .worktrees/core-branch-migration \
-  -b refactor/core-branch-layout user/damin
-git -C .worktrees/core-branch-migration status --short --branch
-test -f .worktrees/core-branch-migration/docs/superpowers/plans/2026-07-14-core-branch-migration.md
-git -C .worktrees/core-branch-migration apply --check \
-  /home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14/user-damin.patch
-```
-
-Expected: clean `refactor/core-branch-layout` worktree at the approved `user/damin` tip; the plan
-is present and the preserved patch applies.
+Expected: checksums match and both status commands still report their known tracked and untracked
+changes. Do not clean, stash, reset, or checkout either worktree.
 
 ---
 
-### Task 2: Add immutable core repository contracts
+### Task 2: Correct the already-committed immutable core contracts forward-only
 
 **Files:**
-- Create: `.dockerignore`
-- Create: `.env.example`
-- Modify: `.gitignore`
-- Create: `docker/versions.env`
-- Create: `docker/requirements/ai.in`
-- Create: `docker/requirements/ai.lock`
-- Create: `tests/helpers/assert.bash`
-- Create: `tests/test_static_contract.bash`
+- Modify: `.env.example`
+- Modify: `docker/versions.env`
+- Modify: `docker/requirements/ai.lock`
+- Create: `scripts/generate_ai_lock.bash`
+- Modify: `tests/test_static_contract.bash`
+- Create: `tests/test_ai_lock.bash`
+- Create: `tests/test_image_indexes.bash`
 
 **Interfaces:**
-- Consumes: immutable image and AI values from Global Constraints.
-- Produces: `assert_file`, `assert_contains`, `assert_not_contains`, common version inputs, and the repository ownership test.
+- Consumes: the initial Task 2 commit `e6da3b4` and the exact OCI-index pins in Global Constraints.
+- Produces: corrected immutable inputs, `generate_ai_lock.bash`, and hashed wheel-only validation for
+  both Tier 1 architectures. Do not amend or drop `e6da3b4`.
 
-- [ ] **Step 1: Write the failing static contract**
+- [ ] **Step 1: Write failing correction tests**
 
-Create `tests/helpers/assert.bash`:
+Extend `tests/test_static_contract.bash` to require exactly:
 
 ```bash
-#!/usr/bin/env bash
-set -euo pipefail
-
-fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
-assert_file() { test -f "$1" || fail "missing file: $1"; }
-assert_contains() { grep -Fq -- "$2" "$1" || fail "$1 does not contain: $2"; }
-assert_not_contains() { ! grep -Fq -- "$2" "$1" || fail "$1 contains forbidden text: $2"; }
+assert_file scripts/generate_ai_lock.bash
+assert_file tests/test_ai_lock.bash
+assert_contains docker/versions.env \
+  'ROS_BASE_IMAGE=ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f'
+assert_contains docker/versions.env \
+  'UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36'
+assert_contains .env.example 'ISAAC_SIM_ROOT='
+assert_contains .env.example 'ISAAC_SIM_COMPAT_VERSION=6.0.1'
+assert_not_contains .env.example 'ISAAC_SIM_ROOT=/home/'
 ```
 
-Create `tests/test_static_contract.bash`:
+Create `tests/test_ai_lock.bash` with these exact assertions:
 
 ```bash
 #!/usr/bin/env bash
@@ -198,121 +191,135 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 source tests/helpers/assert.bash
-
-for path in .dockerignore .env.example docker/versions.env \
-  docker/requirements/ai.in docker/requirements/ai.lock; do
-  assert_file "$path"
+pins=(
+  'torch==2.7.1' 'torchvision==0.22.1' 'diffusers==0.34.0'
+  'huggingface-hub==0.33.4' 'einops==0.8.1' 'timm==1.0.17'
+)
+for pin in "${pins[@]}"; do
+  grep -Fxq "$pin" docker/requirements/ai.in || fail "missing direct input pin: $pin"
+  grep -Eq "^${pin//./\\.}([ ;\\]|$)" docker/requirements/ai.lock || \
+    fail "missing direct lock pin: $pin"
 done
-assert_contains docker/versions.env \
-  'ROS_BASE_IMAGE=osrf/ros:jazzy-desktop@sha256:1d6f898b6ab77636c40f26298070ad3de5a9e06f0a71cf9ab066fd6b7838f151'
-assert_contains docker/versions.env \
-  'UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:88baae1f9fa298996f8313e44559163c535937406d217f1c8ac9d4b86a2020fd'
-assert_not_contains docker/versions.env 'DOOSAN'
-assert_not_contains docker/versions.env 'OPENARM'
-assert_not_contains docker/versions.env 'ISAAC_ROS'
-assert_contains .dockerignore '.env'
-assert_contains .dockerignore '.worktrees'
-assert_contains .dockerignore 'data'
-assert_contains .dockerignore 'checkpoints'
-printf 'static core contract passed\n'
+grep -q -- '--hash=sha256:' docker/requirements/ai.lock || fail 'lock has no hashes'
+grep -Eq '^nvidia-.*platform_machine.*x86_64' docker/requirements/ai.lock || \
+  fail 'NVIDIA dependencies are not x86_64-marked'
+grep -Eq '^triton==.*platform_machine.*x86_64' docker/requirements/ai.lock || \
+  fail 'triton is not x86_64-marked'
+scripts/generate_ai_lock.bash --validate-only
+printf 'AI lock contract passed\n'
 ```
 
-- [ ] **Step 2: Run the contract and verify RED**
-
-Run: `bash tests/test_static_contract.bash`
-
-Expected: FAIL with `missing file: .dockerignore`.
-
-- [ ] **Step 3: Add exact core inputs**
-
-Create `.dockerignore`:
-
-```text
-.git
-.github
-.env
-.worktrees
-.superpowers
-build
-install
-log
-data
-checkpoints
-user-ws
-__pycache__
-.pytest_cache
-.ruff_cache
-.vscode
-*.pyc
-```
-
-Create `.env.example`:
-
-```dotenv
-COMPOSE_PROJECT_NAME=ros2-dev-local
-LOCAL_UID=1000
-LOCAL_GID=1000
-ROS_DOMAIN_ID=42
-RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-DISPLAY=:0
-ISAAC_SIM_ROOT=/home/user/isaacsim
-NEXUS_XAUTH_FILE=/tmp/nexus.xauth
-```
-
-Create `docker/versions.env`:
-
-```dotenv
-ROS_BASE_IMAGE=osrf/ros:jazzy-desktop@sha256:1d6f898b6ab77636c40f26298070ad3de5a9e06f0a71cf9ab066fd6b7838f151
-UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:88baae1f9fa298996f8313e44559163c535937406d217f1c8ac9d4b86a2020fd
-```
-
-Create `docker/requirements/ai.in`:
-
-```text
-torch==2.7.1
-torchvision==0.22.1
-diffusers==0.34.0
-huggingface-hub==0.33.4
-einops==0.8.1
-timm==1.0.17
-```
-
-Append these exact lines to `.gitignore`:
-
-```text
-.env
-.xauth-*
-```
-
-- [ ] **Step 4: Generate the lock as the host user**
-
-Run:
+Create `tests/test_image_indexes.bash`. Parse the two trusted data values without sourcing them and
+for each exact image run:
 
 ```bash
-docker run --rm --user "$(id -u):$(id -g)" \
-  -v "$PWD:/workspace" -w /workspace \
-  ghcr.io/astral-sh/uv:0.8.3@sha256:88baae1f9fa298996f8313e44559163c535937406d217f1c8ac9d4b86a2020fd \
-  /uv pip compile --python-version 3.12 --generate-hashes \
-  --output-file docker/requirements/ai.lock docker/requirements/ai.in
+docker buildx imagetools inspect --raw "$image" | jq -e '
+  [.manifests[].platform | "\(.os)/\(.architecture)"] as $platforms |
+  ($platforms | index("linux/amd64")) != null and
+  ($platforms | index("linux/arm64")) != null
+'
 ```
 
-Expected: lock contains all six direct pins and at least one `--hash=sha256:`.
+Expected: both exact digest references are OCI indexes and expose both Tier 1 platforms.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [ ] **Step 2: Run the tests and verify RED against `e6da3b4`**
 
 Run:
 
 ```bash
 bash tests/test_static_contract.bash
-grep -q -- '--hash=sha256:' docker/requirements/ai.lock
-git diff --check
-git add .dockerignore .env.example .gitignore docker/versions.env \
-  docker/requirements/ai.in docker/requirements/ai.lock \
-  tests/helpers/assert.bash tests/test_static_contract.bash
-git commit -m "build: add immutable core environment inputs"
+bash tests/test_ai_lock.bash
 ```
 
-Expected: `static core contract passed`; commit contains only listed files.
+Expected: the static test fails on the new ROS pin or missing generator. This is the intended
+forward correction point; do not rewrite the old commit.
+
+- [ ] **Step 3: Correct the data files**
+
+Set `docker/versions.env` to exactly:
+
+```dotenv
+ROS_BASE_IMAGE=ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f
+UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36
+```
+
+Set the Isaac entries in `.env.example` to exactly:
+
+```dotenv
+ISAAC_SIM_ROOT=
+ISAAC_SIM_COMPAT_VERSION=6.0.1
+```
+
+- [ ] **Step 4: Implement isolated lock generation**
+
+`scripts/generate_ai_lock.bash` must parse `docker/versions.env` as data with `awk`; it must not
+`source` the file. Require exactly one non-empty `ROS_BASE_IMAGE` and `UV_IMAGE`, reject unknown or
+duplicate keys, and compare them with the two Global Constraint pins. Its execution skeleton is:
+
+```bash
+tmp="$(mktemp -d)"
+uv_container=''
+cleanup() {
+  test -z "$uv_container" || docker rm -f "$uv_container" >/dev/null 2>&1 || true
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
+mkdir -m 0700 "$tmp/bin" "$tmp/out"
+uv_container="$(docker create "$UV_IMAGE")"
+docker cp "$uv_container:/uv" "$tmp/bin/uv"
+docker rm "$uv_container" >/dev/null
+uv_container=''
+chmod 0555 "$tmp/bin/uv"
+docker run --rm --read-only --user "$(id -u):$(id -g)" \
+  --tmpfs /tmp:rw,nosuid,nodev,mode=1777 \
+  --env HOME=/tmp --env UV_CACHE_DIR=/tmp/uv-cache \
+  --mount "type=bind,src=$tmp/bin/uv,dst=/usr/local/bin/uv,readonly" \
+  --mount "type=bind,src=$ROOT/docker/requirements,dst=/requirements,readonly" \
+  --mount "type=bind,src=$tmp/out,dst=/out" \
+  "$ROS_BASE_IMAGE" /usr/local/bin/uv pip compile \
+    --universal --python-version 3.12 --generate-hashes \
+    --output-file /out/ai.lock /requirements/ai.in
+install -m 0644 "$tmp/out/ai.lock" "$ROOT/docker/requirements/ai.lock"
+```
+
+The real script derives `ROOT` from `BASH_SOURCE`, begins from a newly cleaned `mktemp` directory,
+and supports `--validate-only` without rewriting the tracked lock. It never mounts the repository
+writable, never executes `/uv pip` inside the uv image, and never uses an unpinned image.
+
+For `--validate-only`, loop over `linux/amd64` and `linux/arm64`. Inside each iteration create the uv
+temporary container with `docker create --platform "$platform" "$UV_IMAGE"`, extract that
+platform's `/uv` into a freshly cleaned per-platform directory, and run the exact pinned ROS base
+with the same `--platform`. Use `--read-only`, host UID/GID, lock/input mounts read-only, and
+writable tmpfs, then create a temporary Python 3.12 venv and execute:
+
+```bash
+/usr/local/bin/uv pip install --dry-run --require-hashes --only-binary=:all: \
+  --python /tmp/venv/bin/python /requirements/ai.lock
+```
+
+Expected: both platform dry-runs resolve wheels only. An sdist, missing hash, missing arm64 wheel,
+or unmarked NVIDIA/triton requirement fails validation.
+
+- [ ] **Step 5: Regenerate, verify, and commit the forward correction**
+
+Run:
+
+```bash
+bash -n scripts/generate_ai_lock.bash tests/test_ai_lock.bash
+scripts/generate_ai_lock.bash
+bash tests/test_static_contract.bash
+bash tests/test_ai_lock.bash
+bash tests/test_image_indexes.bash
+git diff --check
+git add .env.example docker/versions.env docker/requirements/ai.lock \
+  scripts/generate_ai_lock.bash tests/test_static_contract.bash tests/test_ai_lock.bash \
+  tests/test_image_indexes.bash
+git diff --cached --name-only
+git commit -m "build: correct portable core inputs"
+```
+
+Expected: exactly the seven listed paths are committed after `e6da3b4`; both exact pins/indexes, all six
+direct pins, hashes, x86_64 NVIDIA/triton markers, and amd64/arm64 wheel-only dry-runs pass.
 
 ---
 
@@ -321,13 +328,15 @@ Expected: `static core contract passed`; commit contains only listed files.
 **Files:**
 - Modify: `Dockerfile`
 - Modify: `docker/nexus_env.bash`
+- Modify: `.devcontainer/devcontainer.json`
 - Modify: `tests/test_static_contract.bash`
+- Create: `tests/test_docker_runtime.bash`
 
 **Interfaces:**
 - Consumes: `ROS_BASE_IMAGE`, `UV_IMAGE`, `docker/requirements/ai.lock`.
 - Produces: targets `ros-base`, `ros-dev`, `ros-python-dev`, `ros-ai-dev`; runtime user `developer`; `/opt/venv`.
 
-- [ ] **Step 1: Extend the failing Docker contract**
+- [ ] **Step 1: Extend the failing Docker and runtime contracts**
 
 Append to `tests/test_static_contract.bash` before its final success message:
 
@@ -337,6 +346,10 @@ for target in 'AS ros-base' 'AS ros-dev' 'AS ros-python-dev' 'AS ros-ai-dev'; do
 done
 assert_contains Dockerfile 'USER developer'
 assert_contains Dockerfile 'COPY --from=uv-bin /uv /uvx /usr/local/bin/'
+assert_contains Dockerfile 'ros-jazzy-desktop'
+assert_contains Dockerfile 'uv pip sync --require-hashes'
+assert_contains Dockerfile 'uv pip check'
+assert_not_contains Dockerfile 'ARG DEVELOPER_NAME'
 assert_not_contains Dockerfile 'curl -LsSf https://astral.sh/uv/install.sh'
 for vendor in DOOSAN OPENARM ISAAC_ROS; do
   assert_not_contains Dockerfile "$vendor"
@@ -347,20 +360,19 @@ done
 
 Run: `bash tests/test_static_contract.bash`
 
-Expected: FAIL at `AS ros-base`.
+Expected: FAIL at `AS ros-base` or the explicit desktop/collision-safe account contract.
 
 - [ ] **Step 3: Replace `Dockerfile` with the exact stage contract**
 
 ```dockerfile
 # syntax=docker/dockerfile:1.7
-ARG ROS_BASE_IMAGE=osrf/ros:jazzy-desktop@sha256:1d6f898b6ab77636c40f26298070ad3de5a9e06f0a71cf9ab066fd6b7838f151
-ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:88baae1f9fa298996f8313e44559163c535937406d217f1c8ac9d4b86a2020fd
+ARG ROS_BASE_IMAGE=ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f
+ARG UV_IMAGE=ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36
 FROM ${UV_IMAGE} AS uv-bin
 FROM ${ROS_BASE_IMAGE} AS ros-base
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ARG DEVELOPER_UID=1000
 ARG DEVELOPER_GID=1000
-ARG DEVELOPER_NAME=developer
 ENV DEBIAN_FRONTEND=noninteractive
 ENV VENV_DIR=/opt/venv
 ENV PATH="${VENV_DIR}/bin:${PATH}"
@@ -370,16 +382,35 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       bash-completion ca-certificates curl sudo \
     && rm -rf /var/lib/apt/lists/*
 RUN set -eux; \
-    groupadd --gid "${DEVELOPER_GID}" "${DEVELOPER_NAME}"; \
-    useradd --uid "${DEVELOPER_UID}" --gid "${DEVELOPER_GID}" \
-      --create-home --shell /bin/bash "${DEVELOPER_NAME}"; \
-    printf '%s ALL=(ALL) NOPASSWD:ALL\n' "${DEVELOPER_NAME}" \
-      > "/etc/sudoers.d/${DEVELOPER_NAME}"; \
-    chmod 0440 "/etc/sudoers.d/${DEVELOPER_NAME}"; \
-    install -d -o "${DEVELOPER_NAME}" -g "${DEVELOPER_NAME}" /workspace
+    test "${DEVELOPER_UID}" -gt 0; \
+    test "${DEVELOPER_GID}" -gt 0; \
+    gid_name="$(getent group "${DEVELOPER_GID}" | cut -d: -f1 || true)"; \
+    if [[ -n "${gid_name}" && "${gid_name}" != developer ]]; then \
+      groupmod --new-name developer "${gid_name}"; \
+    elif [[ -z "${gid_name}" ]]; then \
+      groupadd --gid "${DEVELOPER_GID}" developer; \
+    fi; \
+    uid_name="$(getent passwd "${DEVELOPER_UID}" | cut -d: -f1 || true)"; \
+    if [[ -n "${uid_name}" && "${uid_name}" != developer ]]; then \
+      usermod --login developer --home /home/developer --move-home \
+        --gid "${DEVELOPER_GID}" --shell /bin/bash "${uid_name}"; \
+    elif [[ -z "${uid_name}" ]]; then \
+      useradd --uid "${DEVELOPER_UID}" --gid "${DEVELOPER_GID}" \
+        --create-home --home-dir /home/developer --shell /bin/bash developer; \
+    else \
+      usermod --gid "${DEVELOPER_GID}" --home /home/developer \
+        --move-home --shell /bin/bash developer; \
+    fi; \
+    test "$(id -u developer)" = "${DEVELOPER_UID}"; \
+    test "$(id -g developer)" = "${DEVELOPER_GID}"; \
+    printf 'developer ALL=(ALL) NOPASSWD:ALL\n' > /etc/sudoers.d/developer; \
+    chmod 0440 /etc/sudoers.d/developer; \
+    touch /home/developer/.bashrc; \
+    install -d -o developer -g developer /workspace /opt/venv; \
+    chown developer:developer /home/developer/.bashrc /workspace /opt/venv
 COPY docker/nexus_env.bash /etc/profile.d/nexus_env.bash
-RUN printf '\nsource /etc/profile.d/nexus_env.bash\n' \
-      >> "/home/${DEVELOPER_NAME}/.bashrc"
+RUN printf '\nsource /etc/profile.d/nexus_env.bash\n' >> /home/developer/.bashrc \
+    && chown developer:developer /home/developer/.bashrc
 WORKDIR /workspace
 USER developer
 
@@ -388,7 +419,7 @@ USER root
 RUN apt-get update && apt-get install -y --no-install-recommends \
       build-essential gdb git iproute2 iputils-ping jq less lsof net-tools procps \
       python3-colcon-common-extensions python3-pip python3-rosdep python3-vcstool \
-      ros-jazzy-rmw-fastrtps-cpp \
+      ros-jazzy-desktop ros-jazzy-rmw-fastrtps-cpp \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /workspace
 USER developer
@@ -396,6 +427,9 @@ USER developer
 FROM ros-dev AS ros-python-dev
 USER root
 RUN uv venv "${VENV_DIR}" --system-site-packages \
+    && "${VENV_DIR}/bin/python" -c \
+      'import sys; assert sys.version_info[:2] == (3, 12), sys.version' \
+    && test "$(uv --version)" = 'uv 0.8.3' \
     && chown -R developer:developer "${VENV_DIR}"
 WORKDIR /workspace
 USER developer
@@ -403,7 +437,13 @@ USER developer
 FROM ros-python-dev AS ros-ai-dev
 USER root
 COPY docker/requirements/ai.lock /tmp/ai.lock
-RUN uv pip sync --python "${VENV_DIR}" /tmp/ai.lock \
+RUN uv pip sync --require-hashes --python "${VENV_DIR}/bin/python" /tmp/ai.lock \
+    && uv pip check --python "${VENV_DIR}/bin/python" \
+    && "${VENV_DIR}/bin/python" -c \
+      'import diffusers, einops, huggingface_hub, timm, torch, torchvision' \
+    && "${VENV_DIR}/bin/python" -c \
+      'import sys; assert sys.version_info[:2] == (3, 12), sys.version' \
+    && test "$(uv --version)" = 'uv 0.8.3' \
     && chown -R developer:developer "${VENV_DIR}"
 WORKDIR /workspace
 USER developer
@@ -427,23 +467,48 @@ if [[ -f /workspace/config/fastdds.xml ]]; then
 fi
 ```
 
-- [ ] **Step 5: Verify stages and commit**
+- [ ] **Step 5: Test both collision paths, exact tools, and AI imports**
+
+Set `.devcontainer/devcontainer.json` to use `"remoteUser": "developer"` and keep the interpreter
+at `/opt/venv/bin/python`; no core Dev Container may request root.
+
+Create `tests/test_docker_runtime.bash` to build `ros-python-dev` twice, once with
+`DEVELOPER_UID=1000 DEVELOPER_GID=1000` (the Noble `ubuntu:1000` collision) and once with
+`12345:12345`. For each image, run as its default user and assert:
+
+```bash
+test "$(id -un)" = developer
+test "$(id -u)" != 0
+test "$(stat -c %U /home/developer/.bashrc)" = developer
+test "$(stat -c %U /workspace)" = developer
+test "$(stat -c %U /opt/venv)" = developer
+python -c 'import sys; assert sys.version_info[:2] == (3, 12)'
+test "$(uv --version)" = 'uv 0.8.3'
+test "$ROS_DISTRO" = jazzy
+ros2 pkg prefix demo_nodes_cpp
+```
+
+Also assert builds with UID 0 or GID 0 fail. Build `ros-ai-dev`, run `uv pip check`, and import
+all six direct packages from `/opt/venv`. These are runtime tests, not Dockerfile greps.
+
+- [ ] **Step 6: Verify stages and commit**
 
 Run:
 
 ```bash
 bash -n docker/nexus_env.bash
 bash tests/test_static_contract.bash
-docker build --target ros-python-dev \
-  --build-arg DEVELOPER_UID="$(id -u)" --build-arg DEVELOPER_GID="$(id -g)" .
-docker build --target ros-ai-dev \
-  --build-arg DEVELOPER_UID="$(id -u)" --build-arg DEVELOPER_GID="$(id -g)" .
+bash tests/test_docker_runtime.bash
 git diff --check
-git add Dockerfile docker/nexus_env.bash tests/test_static_contract.bash
+git add Dockerfile docker/nexus_env.bash .devcontainer/devcontainer.json \
+  tests/test_static_contract.bash \
+  tests/test_docker_runtime.bash
 git commit -m "build: consolidate non-root core targets"
 ```
 
-Expected: both targets build, static contract passes, no vendor token appears in `Dockerfile`.
+Expected: both account-ID cases and `ros-ai-dev` pass; UID/GID 0 fail; Python is 3.12, uv is
+exactly 0.8.3, ROS desktop/demo/RViz packages are present, the hash lock is enforced, and no vendor
+token appears in `Dockerfile`.
 
 ---
 
@@ -475,14 +540,22 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 cp .env.example "$tmp/local.env"
 base="$tmp/base.json"
 docker compose --env-file docker/versions.env --env-file "$tmp/local.env" \
-  -f compose.yml config --format json > "$base"
+  -f compose.yml --profile ai config --format json > "$base"
 jq -e '.services.ros2_dev.build.target == "ros-python-dev"' "$base"
-jq -e '.services.ros2_dev.user != "0" and .services.ros2_dev.user != "root"' "$base"
-jq -e '.services.ros2_dev | has("container_name") | not' "$base"
-jq -e '.services.ros2_dev | has("network_mode") | not' "$base"
-jq -e '.services.ros2_dev | has("pid") | not' "$base"
-jq -e '.services.ros2_dev | has("ipc") | not' "$base"
-jq -e '[.services.ros2_dev.volumes[]?.target] | index("/var/run/docker.sock") | not' "$base"
+for service in ros2_dev ai_dev; do
+  jq -e --arg s "$service" '.services[$s].user != null and
+    .services[$s].user != "" and .services[$s].user != "0" and
+    .services[$s].user != "0:0" and .services[$s].user != "root"' "$base"
+  jq -e --arg s "$service" '.services[$s] | has("container_name") | not' "$base"
+  jq -e --arg s "$service" '.services[$s] | has("network_mode") | not' "$base"
+  jq -e --arg s "$service" '.services[$s] | has("pid") | not' "$base"
+  jq -e --arg s "$service" '.services[$s] | has("ipc") | not' "$base"
+  jq -e --arg s "$service" \
+    '[.services[$s].volumes[]?.target] | index("/var/run/docker.sock") | not' "$base"
+  for arg in ROS_BASE_IMAGE UV_IMAGE DEVELOPER_UID DEVELOPER_GID; do
+    jq -e --arg s "$service" --arg a "$arg" '.services[$s].build.args[$a] != null' "$base"
+  done
+done
 ! grep -Eqi 'doosan|openarm|isaac_ros' "$base"
 printf 'compose core contract passed\n'
 ```
@@ -495,19 +568,23 @@ Expected: FAIL because current base has fixed name and host privileges.
 
 - [ ] **Step 3: Implement base services and independent overrides**
 
-Use anchors for build args and non-root service defaults. `compose.yml` must define only:
+Use anchors for build args and non-root service defaults. Both services must include:
 
 ```yaml
-services:
-  ros2_dev:
-    build: {context: ., dockerfile: Dockerfile, target: ros-python-dev}
-  ai_dev:
-    profiles: [ai]
-    build: {context: ., dockerfile: Dockerfile, target: ros-ai-dev}
+build:
+  context: .
+  dockerfile: Dockerfile
+  args:
+    ROS_BASE_IMAGE: "${ROS_BASE_IMAGE:?ROS_BASE_IMAGE is required}"
+    UV_IMAGE: "${UV_IMAGE:?UV_IMAGE is required}"
+    DEVELOPER_UID: "${LOCAL_UID:?LOCAL_UID is required}"
+    DEVELOPER_GID: "${LOCAL_GID:?LOCAL_GID is required}"
+user: "${LOCAL_UID:?LOCAL_UID is required}:${LOCAL_GID:?LOCAL_GID is required}"
 ```
 
-Both services must set `user: "${LOCAL_UID}:${LOCAL_GID}"`, `init: true`, ROS/FastDDS
-environment, and only `.:/workspace:rw`. Add the same two service keys to each override:
+`ros2_dev` selects `ros-python-dev`; `ai_dev` is in profile `ai` and selects `ros-ai-dev`. Both set
+`init: true`, ROS/FastDDS environment, and only the repository workspace bind. Keep the approved
+public profile files `core.conf` and `isaac-host.conf`; do not add a vendor-named profile.
 
 ```yaml
 # compose/host-dds.yml
@@ -528,12 +605,22 @@ services:
 
 ```yaml
 # compose/gui.yml
+x-gui: &gui
+  environment: {DISPLAY: "${DISPLAY}", XAUTHORITY: /tmp/.nexus.xauth, QT_X11_NO_MITSHM: "1"}
+  volumes:
+    - type: bind
+      source: /tmp/.X11-unix
+      target: /tmp/.X11-unix
+      read_only: true
+      bind: {create_host_path: false}
+    - type: bind
+      source: "${NEXUS_XAUTH_FILE:?NEXUS_XAUTH_FILE is required}"
+      target: /tmp/.nexus.xauth
+      read_only: true
+      bind: {create_host_path: false}
 services:
-  ros2_dev:
-    environment: {DISPLAY: "${DISPLAY}", XAUTHORITY: /tmp/.nexus.xauth, QT_X11_NO_MITSHM: "1"}
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:ro
-      - ${NEXUS_XAUTH_FILE}:/tmp/.nexus.xauth:ro
+  ros2_dev: *gui
+  ai_dev: *gui
 ```
 
 Create manifests:
@@ -544,8 +631,8 @@ PROFILE_VERSION=1
 SERVICE=ros2_dev
 COMPOSE_FILES=compose.yml
 COMPOSE_PROFILES=
-DOCTOR_COMMAND=base
-CHECK_COMMAND=core
+DOCTOR_COMMAND=scripts/doctor.bash,base
+CHECK_COMMAND=tests/test_static_contract.bash
 ```
 
 ```text
@@ -554,11 +641,11 @@ PROFILE_VERSION=1
 SERVICE=ros2_dev
 COMPOSE_FILES=compose.yml,compose/host-dds.yml
 COMPOSE_PROFILES=
-DOCTOR_COMMAND=isaac-host
-CHECK_COMMAND=isaac-host
+DOCTOR_COMMAND=scripts/doctor.bash,isaac-host
+CHECK_COMMAND=scripts/doctor.bash,isaac-host
 ```
 
-- [ ] **Step 4: Expand tests for override scope**
+- [ ] **Step 4: Expand tests for every supported normalized combination**
 
 Render each override combination and assert:
 
@@ -572,6 +659,16 @@ jq -e '.services.ai_dev.gpus != null' "$tmp/gpu.json"
 jq -e '.services.ros2_dev | has("gpus") | not' "$tmp/gpu.json"
 ```
 
+Render and validate these matrices: base; base+host DDS; base+GUI; base+host DDS+GUI; base with
+`--profile ai`; AI+GPU; AI+GUI; AI+host DDS; and AI+GPU+GUI+host DDS. For every normalized model,
+repeat the least-privilege checks for every present service and verify only the explicitly selected
+overlay grants host network, GPU, or GUI. Inspect both GUI binds for long syntax, `read_only: true`,
+and `bind.create_host_path: false`.
+
+Add negative fixtures for missing, empty, `0`, `0:0`, and `root` runtime identities; both services
+must fail normalization/validation rather than silently default. Assert the local Compose version is
+at least 2.30 here; Task 8 pins CI to an actual 2.30.x release so the syntax floor is proven.
+
 - [ ] **Step 5: Verify GREEN and commit**
 
 Run:
@@ -584,7 +681,9 @@ git add compose.yml compose profiles tests/test_compose.bash
 git commit -m "build: isolate core runtime privileges"
 ```
 
-Expected: `compose core contract passed`; no vendor service exists.
+Expected: `compose core contract passed`; both services receive all four build args, all identity
+negative cases fail, every supported combination renders, both services remain least-privilege in
+base configuration, GUI binds cannot create host paths, and no vendor service exists.
 
 ---
 
@@ -607,13 +706,23 @@ Test these exact behaviors in temporary directories:
 
 ```text
 init creates .env once and never overwrites it
-invalid UID/GID/domain/project values fail
+missing, empty, zero, or root UID/GID and invalid domain/project values fail
+profile names outside [a-z0-9][a-z0-9-]* fail
 unknown profile key fails
+duplicate profile key fails
+every required key missing in turn fails
+empty SERVICE, COMPOSE_FILES, DOCTOR_COMMAND, or CHECK_COMMAND fails
+an empty COMPOSE_PROFILES value is accepted, but leading/trailing/doubled commas fail
+duplicate COMPOSE_FILES and COMPOSE_PROFILES items fail
+absolute paths and any .. path component fail
+Compose or check-command symlinks escaping the repository fail
 missing profile reports E_PROFILE
 core-dev resolves service ros2_dev and compose.yml
 isaac-host-dev resolves compose.yml plus compose/host-dds.yml
-doosan-dev on main fails E_PROFILE
+missing-dev on main fails E_PROFILE
+SERVICE missing from normalized Compose output fails before lifecycle execution
 profile values containing shell metacharacters are rejected
+generic-check and generic-doctor execute the fixture through direct argv
 ```
 
 The test command is `bash tests/test_init.bash && bash tests/test_profiles.bash`.
@@ -627,11 +736,20 @@ Expected: FAIL because `scripts/lib/profile.bash` does not exist.
 `scripts/lib/profile.bash` must read each non-comment `KEY=VALUE` line, accept only
 `PROFILE_VERSION`, `SERVICE`, `COMPOSE_FILES`, `COMPOSE_PROFILES`, `DOCTOR_COMMAND`,
 `CHECK_COMMAND`, reject values outside `[A-Za-z0-9_./,:-]*`, require version `1`, and populate
-arrays without `eval` or `source`.
+arrays without `eval` or `source`. Require every key exactly once; only `COMPOSE_PROFILES=` may be
+an empty whole value. Reject duplicate list entries and empty items from leading, trailing, or
+doubled commas.
+
+Profile names must match `[a-z0-9][a-z0-9-]*`. Every Compose file and the first argv item in each
+doctor/check command must be a non-absolute repository-relative path with no `..` component. Resolve
+each with `realpath`, require the canonical result to remain under `ROOT`, require it to be a regular
+file, and thereby reject a symlink escape. Split doctor/check values on commas into arrays only after
+validation; remaining argv items are restricted scalar tokens, not paths or shell fragments.
 
 `scripts/lib/config.bash` must parse `.env` with the same data-only rule, validate UID/GID as
 positive integers, domain `0..232`, project name `[a-z0-9][a-z0-9_-]*`, copy `.env.example`
-only when `.env` is absent, and never overwrite an existing file.
+only when `.env` is absent, and never overwrite an existing file. UID and GID 0 are invalid; a
+missing or empty runtime identity is invalid rather than defaulted.
 
 - [ ] **Step 4: Replace `run.sh` with generic dispatch**
 
@@ -645,7 +763,30 @@ init, doctor, build, up, shell, dev, check, status, down
 
 The suffix determines the action, the remaining prefix determines `profiles/<name>.conf`, and
 unprefixed lifecycle commands use `core`. Every Docker command uses both env files and every
-manifest Compose file. No vendor name appears in `run.sh`.
+manifest Compose file. Before dispatch, run normalized `docker compose config --services` with the
+constructed argv and require an exact line equal to `SERVICE`.
+
+Build doctor/check commands as arrays and execute `"${doctor_argv[@]}"` or
+`"${check_argv[@]}"`; lifecycle commands likewise use a Compose argv array. `run.sh` and both
+libraries must contain no `eval`, profile `source`, or `bash -c`. No vendor name appears in
+`run.sh`.
+
+The profile manifests use direct repo-contained argv:
+
+```text
+# profiles/core.conf
+DOCTOR_COMMAND=scripts/doctor.bash,base
+CHECK_COMMAND=tests/test_static_contract.bash
+
+# profiles/isaac-host.conf
+DOCTOR_COMMAND=scripts/doctor.bash,isaac-host
+CHECK_COMMAND=scripts/doctor.bash,isaac-host
+```
+
+In `tests/test_profiles.bash`, create and remove a temporary in-repository `generic.conf` plus a
+fixture executable that records each argument on its own line. Invoke the real
+`./run.sh generic-check` and `./run.sh generic-doctor`, then compare the captured argv exactly. Also
+stub Docker and assert service validation happened. Parser-only tests do not satisfy this step.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
@@ -656,13 +797,17 @@ bash -n run.sh scripts/lib/config.bash scripts/lib/profile.bash
 bash tests/test_init.bash
 bash tests/test_profiles.bash
 ! grep -Eqi 'doosan|openarm|isaac_ros' run.sh
+! rg -n '\beval\b|\bsource[[:space:]]+profiles/|bash[[:space:]]+-c' \
+  run.sh scripts/lib/config.bash scripts/lib/profile.bash
 git diff --check
 git add run.sh scripts/lib/config.bash scripts/lib/profile.bash \
   tests/test_init.bash tests/test_profiles.bash
 git commit -m "feat: add generic environment profiles"
 ```
 
-Expected: both test suites pass and vendor grep returns no match.
+Expected: every negative fixture fails with `E_PROFILE`, actual generic check/doctor dispatch uses
+the exact captured argv, service validation runs before dispatch, and the forbidden-shell scan plus
+vendor grep return no match.
 
 ---
 
@@ -671,7 +816,9 @@ Expected: both test suites pass and vendor grep returns no match.
 **Files:**
 - Create: `scripts/doctor.bash`
 - Modify: `scripts/launch_isaac_sim.sh`
+- Create: `scripts/check_isaac_host.bash`
 - Create: `tests/test_doctor.bash`
+- Create: `tests/test_isaac_host.bash`
 
 **Interfaces:**
 - Produces: `./run.sh doctor [core|isaac-host]`, error codes `E_PREREQUISITE` and compact PASS/FAIL output.
@@ -679,9 +826,11 @@ Expected: both test suites pass and vendor grep returns no match.
 
 - [ ] **Step 1: Write failing doctor scenarios**
 
-Cover missing Docker, Compose below 2.30, invalid env, missing Isaac root, non-executable launcher,
-and success. Stub commands through a temporary `PATH`; assert default output is at most six lines
-and `--verbose` includes individual checks.
+Cover missing Docker, Compose below 2.30, invalid env, non-x86_64, missing NVIDIA prerequisite,
+missing Isaac root, non-executable launcher, incompatible `VERSION`, FastDDS/domain mismatch, and
+success. Stub `uname`, `nvidia-smi`, Docker, the launcher, `${ISAAC_SIM_ROOT}/VERSION`, and ROS CLI
+through temporary fixtures; assert default output is at most six lines and `--verbose` includes
+individual checks.
 
 - [ ] **Step 2: Verify RED**
 
@@ -700,26 +849,45 @@ FAIL E_PREREQUISITE
 ```
 
 Core checks Docker Engine, Compose 2.30+, BuildKit availability, env validity, and repository
-files. Isaac-host additionally checks `$ISAAC_SIM_ROOT/isaac-sim.sh`, host network support,
-`config/fastdds.xml`, and matching ROS domain/RMW settings.
+files. Resolve the Isaac root exactly as:
 
-`scripts/launch_isaac_sim.sh` must derive its root only from `ISAAC_SIM_ROOT` or the documented
-default, export `ROS_DOMAIN_ID`, `RMW_IMPLEMENTATION`, and both FastDDS profile variables, then
+```bash
+ISAAC_SIM_ROOT="${ISAAC_SIM_ROOT:-$HOME/isaacsim}"
+```
+
+Isaac-host additionally requires host `uname -m` to be `x86_64`, a successful read-only NVIDIA
+prerequisite probe, executable `$ISAAC_SIM_ROOT/isaac-sim.sh`, readable
+`$ISAAC_SIM_ROOT/VERSION` beginning with the configured `6.0.1`, host network support, both FastDDS
+variables resolving to the repository `config/fastdds.xml`, `rmw_fastrtps_cpp`, and the same
+`ROS_DOMAIN_ID` as normalized Compose output. It must not install drivers/packages, download Isaac,
+change GPU settings, or issue simulator/robot motion commands.
+
+`scripts/launch_isaac_sim.sh` must use the same safe default, export `ROS_DOMAIN_ID`,
+`RMW_IMPLEMENTATION`, and both FastDDS profile variables, then
 `exec "$ISAAC_SIM_ROOT/isaac-sim.sh" "$@"`. It must not install or download Isaac Sim.
+
+`scripts/check_isaac_host.bash` is a non-destructive bridge acceptance. It never starts Isaac and
+never publishes or invokes a service. If the installation or running ROS graph is absent, print
+`SKIP E_PREREQUISITE` and exit 77. If prerequisites are present, use a bounded timeout to discover
+the expected Isaac topic or observe one `/clock` message; success exits 0, while discovery failure
+is a non-77 failure. `tests/test_isaac_host.bash` covers PASS, SKIP, and FAIL distinctly.
 
 - [ ] **Step 4: Verify GREEN and commit**
 
 Run:
 
 ```bash
-bash -n scripts/doctor.bash scripts/launch_isaac_sim.sh
+bash -n scripts/doctor.bash scripts/launch_isaac_sim.sh scripts/check_isaac_host.bash
 bash tests/test_doctor.bash
+bash tests/test_isaac_host.bash
 git diff --check
-git add scripts/doctor.bash scripts/launch_isaac_sim.sh tests/test_doctor.bash
+git add scripts/doctor.bash scripts/launch_isaac_sim.sh scripts/check_isaac_host.bash \
+  tests/test_doctor.bash tests/test_isaac_host.bash
 git commit -m "feat: add core and host Isaac diagnostics"
 ```
 
-Expected: doctor tests pass with compact output.
+Expected: doctor tests pass with compact output; Isaac acceptance reports PASS, explicit SKIP 77,
+or blocking FAIL correctly, and no install/download/simulator-control/hardware-control command exists.
 
 ---
 
@@ -731,15 +899,24 @@ Expected: doctor tests pass with compact output.
 - Delete: `docker/bootstrap_doosan_emulator.bash`
 - Delete: `.devcontainer/doosan/compose.yml`
 - Delete: `.devcontainer/doosan/devcontainer.json`
+- Delete: `docs/tutorials/2-week-isaac-ros2-a0912-onboarding.md`
+- Delete: `docs/tutorials/cube-pick-dataset-interface.md`
 - Delete: `docs/tutorials/day-05-*` through `docs/tutorials/day-10-*`
 - Modify: `README.md`
 - Modify: `docs/tutorials/README.md`
+- Modify: `docs/tutorials/day-01-isaac-sim-basics/hands-on.md`
+- Modify: `docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/hands-on.md`
+- Modify: `docs/tutorials/day-03-python-scripting-minimum-loop/hands-on.md`
+- Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md`
+- Modify: `docs/tutorials/day-04-ros2-bridge-observation-pipeline/hands-on.md`
 - Modify: `docs/tutorials/shared/environment-setup.md`
 - Modify: `docs/tutorials/shared/README.md`
 - Modify: `docs/tutorials/shared/official-tutorial-map.md`
 - Modify: `docs/tutorials/shared/cube-pick-v1-dataset-policy-interface.md`
 - Modify: `docs/tutorials/shared/later-milestones.md`
 - Modify: `docs/tutorials/shared/glossary.md`
+- Modify: `docs/troubleshooting/2026-07-07-isaacsim-ros2-bridge-fastdds.md`
+- Create: `tests/fixtures/core-deleted-paths.txt`
 - Modify: `scripts/check_dev_workflow.sh`
 - Modify: `tests/test_static_contract.bash`
 
@@ -760,7 +937,9 @@ docs/tutorials/day-05-*/** through day-10-*/**
 ```
 
 Also fail when `README.md` or `docs/tutorials/**/*.md` contains `/home/ahrism`, `doosan-dev`,
-`full-dev`, `A0912`, or `Dockerfile.doosan`.
+`full-dev`, `A0912`, or `Dockerfile.doosan`. Scan active README/docs while explicitly excluding
+historical governance material under `docs/superpowers/**`; permit branch-governance names such as
+`doosan-tutorial`, but reject live vendor runtime paths/services/targets.
 
 - [ ] **Step 2: Run and verify RED**
 
@@ -768,11 +947,47 @@ Run: `bash tests/test_static_contract.bash`
 
 Expected: FAIL on the first tracked vendor path.
 
-- [ ] **Step 3: Delete vendor and leaf tutorial paths with `apply_patch`**
+- [ ] **Step 3: Record and delete the complete preservation inventory with `apply_patch`**
 
-Delete the listed files/directories only after confirming each exists in
-`migration/pre-split-2026-07-14`. Do not touch the root dirty worktree; all deletions occur in the
-isolated core worktree.
+Create `tests/fixtures/core-deleted-paths.txt` with exactly these 31 tracked paths:
+
+```text
+.devcontainer/doosan/compose.yml
+.devcontainer/doosan/devcontainer.json
+Dockerfile.doosan
+Dockerfile.isaac-moveit
+docker/bootstrap_doosan_emulator.bash
+docs/tutorials/2-week-isaac-ros2-a0912-onboarding.md
+docs/tutorials/cube-pick-dataset-interface.md
+docs/tutorials/day-05-manipulator-concepts-before-a0912/README.md
+docs/tutorials/day-05-manipulator-concepts-before-a0912/checkpoint.md
+docs/tutorials/day-05-manipulator-concepts-before-a0912/concepts.md
+docs/tutorials/day-05-manipulator-concepts-before-a0912/hands-on.md
+docs/tutorials/day-06-doosan-a0912-bringup/README.md
+docs/tutorials/day-06-doosan-a0912-bringup/checkpoint.md
+docs/tutorials/day-06-doosan-a0912-bringup/concepts.md
+docs/tutorials/day-06-doosan-a0912-bringup/hands-on.md
+docs/tutorials/day-07-a0912-scripted-motion/README.md
+docs/tutorials/day-07-a0912-scripted-motion/checkpoint.md
+docs/tutorials/day-07-a0912-scripted-motion/concepts.md
+docs/tutorials/day-07-a0912-scripted-motion/hands-on.md
+docs/tutorials/day-08-cube-pick-scene-v0/README.md
+docs/tutorials/day-08-cube-pick-scene-v0/checkpoint.md
+docs/tutorials/day-08-cube-pick-scene-v0/concepts.md
+docs/tutorials/day-08-cube-pick-scene-v0/hands-on.md
+docs/tutorials/day-09-dataset-collection/README.md
+docs/tutorials/day-09-dataset-collection/checkpoint.md
+docs/tutorials/day-09-dataset-collection/concepts.md
+docs/tutorials/day-09-dataset-collection/hands-on.md
+docs/tutorials/day-10-policy-connection-preparation/README.md
+docs/tutorials/day-10-policy-connection-preparation/checkpoint.md
+docs/tutorials/day-10-policy-connection-preparation/concepts.md
+docs/tutorials/day-10-policy-connection-preparation/hands-on.md
+```
+
+Before deletion, loop over every line and run
+`git cat-file -e "migration/pre-split-2026-07-14:$path"`. Delete every listed path with
+`apply_patch`; then assert `test ! -e "$path"` for every line. Do not touch the root dirty worktree.
 
 - [ ] **Step 4: Rewrite core documentation**
 
@@ -784,6 +999,11 @@ that Days 5-10 live on the two tutorial branches. Replace absolute repository pa
 Remove A0912-specific dataset and later-milestone content from the two shared files while retaining
 their exact originals in the preservation tag for `doosan-tutorial` restoration.
 
+Explicitly remove Day 4 README's next-link to the deleted Day 5/two-week index. Replace every
+`/home/ahrism` occurrence in retained Days 1-4 and shared docs. Rewrite the FastDDS troubleshooting
+host value to `$REPO_ROOT/config/fastdds.xml`. Document the non-destructive Isaac acceptance command,
+including PASS, exit-77 SKIP when Isaac is absent, and blocking FAIL when prerequisites exist.
+
 Replace `scripts/check_dev_workflow.sh` with a wrapper:
 
 ```bash
@@ -791,8 +1011,10 @@ Replace `scripts/check_dev_workflow.sh` with a wrapper:
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
-exec tests/run_all.bash
+exec tests/test_static_contract.bash
 ```
+
+This ordering is mandatory: `tests/run_all.bash` does not exist until Task 8.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
@@ -800,16 +1022,35 @@ Run:
 
 ```bash
 bash tests/test_static_contract.bash
-! git ls-files | grep -E '(^Dockerfile\.(doosan|isaac-moveit)$|doosan|day-(05|06|07|08|09|10)-)'
-! rg -n '/home/ahrism|doosan-dev|full-dev|A0912' README.md docs/tutorials
+while IFS= read -r path; do
+  test ! -e "$path"
+  git cat-file -e "migration/pre-split-2026-07-14:$path"
+done < tests/fixtures/core-deleted-paths.txt
+! rg -n '/home/ahrism|doosan-dev|full-dev|A0912|Dockerfile\.doosan|IsaacSim-ros_workspaces' \
+  README.md docs --glob '*.md' --glob '!docs/superpowers/**'
+! rg -n 'day-05|2-week-isaac-ros2-a0912' \
+  docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md
 git diff --check
-git add -A -- README.md Dockerfile.doosan Dockerfile.isaac-moveit \
-  .devcontainer/doosan docker/bootstrap_doosan_emulator.bash \
-  docs/tutorials scripts/check_dev_workflow.sh tests/test_static_contract.bash
+mapfile -t deleted_paths < tests/fixtures/core-deleted-paths.txt
+git add -A -- "${deleted_paths[@]}"
+git add README.md docs/tutorials/README.md \
+  docs/tutorials/day-01-isaac-sim-basics/hands-on.md \
+  docs/tutorials/day-02-jetbot-turtlebot-ros2-driving/hands-on.md \
+  docs/tutorials/day-03-python-scripting-minimum-loop/hands-on.md \
+  docs/tutorials/day-04-ros2-bridge-observation-pipeline/README.md \
+  docs/tutorials/day-04-ros2-bridge-observation-pipeline/hands-on.md \
+  docs/tutorials/shared/README.md docs/tutorials/shared/environment-setup.md \
+  docs/tutorials/shared/official-tutorial-map.md \
+  docs/tutorials/shared/cube-pick-v1-dataset-policy-interface.md \
+  docs/tutorials/shared/later-milestones.md docs/tutorials/shared/glossary.md \
+  docs/troubleshooting/2026-07-07-isaacsim-ros2-bridge-fastdds.md \
+  scripts/check_dev_workflow.sh tests/test_static_contract.bash \
+  tests/fixtures/core-deleted-paths.txt
 git commit -m "refactor: keep main vendor neutral"
 ```
 
-Expected: ownership test passes and preservation tag still contains every deleted path.
+Expected: the ownership/portability test passes, all 31 paths are absent from the committed core
+tree, and the preservation tag contains every one of their blobs.
 
 ---
 
@@ -819,6 +1060,7 @@ Expected: ownership test passes and preservation tag still contains every delete
 - Create: `tests/run_all.bash`
 - Create: `.github/workflows/core-environment.yml`
 - Modify: `tests/test_static_contract.bash`
+- Modify: `scripts/check_dev_workflow.sh`
 
 **Interfaces:**
 - Produces: `tests/run_all.bash`; CI jobs `static`, `build-amd64`, `build-arm64`.
@@ -835,10 +1077,13 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 for test_file in \
   tests/test_static_contract.bash \
+  tests/test_ai_lock.bash \
+  tests/test_docker_runtime.bash \
   tests/test_init.bash \
   tests/test_profiles.bash \
   tests/test_compose.bash \
-  tests/test_doctor.bash; do
+  tests/test_doctor.bash \
+  tests/test_isaac_host.bash; do
   bash "$test_file"
 done
 printf 'all core tests passed\n'
@@ -846,6 +1091,9 @@ printf 'all core tests passed\n'
 
 Add a static assertion that the workflow contains `linux/amd64`, `linux/arm64`, and
 `tests/run_all.bash`.
+
+Now, and only now, change `scripts/check_dev_workflow.sh` from the Task 7 static-test wrapper to
+`exec tests/run_all.bash`.
 
 - [ ] **Step 2: Verify RED**
 
@@ -855,17 +1103,38 @@ Expected: FAIL because `.github/workflows/core-environment.yml` is missing.
 
 - [ ] **Step 3: Add CI jobs**
 
-The workflow must run on pull requests and pushes to `main`, install jq and Docker Buildx, run
-`tests/run_all.bash`, build `ros-python-dev` for both platforms without publishing, and run an
-amd64 container smoke command that verifies:
+The workflow must run on pull requests and pushes to `main`. Pin setup dependencies to these exact
+full commits and pin Compose to the supported minimum series:
+
+```yaml
+actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
+docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+docker/setup-compose-action@2fe291b7677a45ee1269ec56a42604c143505e7e
+with:
+  version: v2.30.3
+```
+
+After setup, assert `docker compose version --short` is exactly `2.30.3`, run
+`tests/test_image_indexes.bash`, and run the unified tests. Set up QEMU for arm64 and Buildx
+explicitly. Build `ros-python-dev` separately for `linux/amd64` and `linux/arm64`, load each local
+single-platform image without publishing, then run each image with its matching `--platform`.
+Arm64 runtime must execute through QEMU or a native runner; build-only coverage is insufficient.
+
+For both platforms verify:
 
 ```bash
-id -u
-python --version
-uv --version
+test "$(id -un)" = developer
+test "$(id -u)" != 0
+python -c 'import sys; assert sys.version_info[:2] == (3, 12)'
+test "$(uv --version)" = 'uv 0.8.3'
 ros2 pkg prefix demo_nodes_cpp
 test "$ROS_DISTRO" = jazzy
 ```
+
+Also start `demo_nodes_cpp` listener and talker within a bounded-time container smoke and require
+at least one `I heard:` line on each platform. Stop the processes afterward; no runtime Docker
+socket is mounted.
 
 No job may build vendor targets, push images, mount Docker socket into a runtime service, or run
 hardware commands.
@@ -878,11 +1147,14 @@ Run:
 bash tests/run_all.bash
 git diff --check
 git add tests/run_all.bash tests/test_static_contract.bash \
-  .github/workflows/core-environment.yml
+  scripts/check_dev_workflow.sh .github/workflows/core-environment.yml
 git commit -m "ci: verify portable core environment"
 ```
 
-Expected: `all core tests passed`.
+Expected: `all core tests passed`; both exact OCI indexes expose amd64+arm64, QEMU/native arm64 and
+amd64 runtime smokes pass with exact Python/uv/Jazzy/non-root checks and talker/listener exchange,
+and Compose is exactly 2.30.3. The workflow contains no push, vendor target, simulator install,
+runtime Docker-socket mount, or hardware-control command.
 
 ---
 
@@ -896,57 +1168,127 @@ Expected: `all core tests passed`.
 - Consumes: completed `refactor/core-branch-layout`.
 - Produces: verified local `main` containing the approved design and core implementation.
 
-- [ ] **Step 1: Run complete static and configuration verification**
+- [ ] **Step 1: Repeat every preservation and forward-history gate**
+
+Run:
+
+```bash
+BACKUP=/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14
+ROOT=/home/ahrism/workspace/ros2-dev
+FEATURE="$ROOT/.worktrees/team-shared-dev-env"
+test "$(git rev-parse migration/pre-split-2026-07-14^{})" = \
+  6bb7f14f748416f64712ce63103bea1b02997fea
+git merge-base --is-ancestor e6da3b444d501e2175517efb4c5b983b5fa5701b HEAD
+test "$(sha256sum "$BACKUP/manifest.txt" | awk '{print $1}')" = \
+  39478896d14aefd7c1f40b46a3117974d45917811d90c108818ccc5cb2df92da
+test "$(sha256sum "$BACKUP/user-damin.patch" | awk '{print $1}')" = \
+  a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
+test "$(sha256sum "$ROOT/Dockerfile.doosan" | awk '{print $1}')" = \
+  d236f98f1185458b52aab3d6ed49b8eb208a87afcc8662739e4841951422a4a9
+test "$(sha256sum "$ROOT/scripts/check_dev_workflow.sh" | awk '{print $1}')" = \
+  06b0a687b041b3b9a4f66be1b5ca84e606ae1e7a155c3e136a315a62aa64235f
+test "$(sha256sum "$ROOT/docs/[리버트론]OpenArm(AA-K1)_User Manual_한글판.pdf" | awk '{print $1}')" = \
+  6b35dd70c72ac76eed385adfedb9936d13d514fec74e4a8811aa321c888560e6
+git -C "$ROOT" status --short --branch
+git -C "$FEATURE" status --short --branch
+while IFS= read -r path; do
+  test ! -e "$path"
+  git cat-file -e "migration/pre-split-2026-07-14:$path"
+done < tests/fixtures/core-deleted-paths.txt
+```
+
+Expected: all hashes and all 31 tag blobs match; both protected dirty-worktree inventories remain
+present and unchanged. Any mismatch stops integration without cleanup/reset/stash.
+
+- [ ] **Step 2: Repeat complete core and both-platform acceptance**
 
 Run:
 
 ```bash
 bash tests/run_all.bash
-docker compose --env-file docker/versions.env --env-file .env.example config -q
+bash tests/test_image_indexes.bash
+test "$(docker compose version --short)" = 2.30.3
+docker compose --env-file docker/versions.env --env-file .env.example \
+  --profile ai config -q
+docker buildx build --platform linux/amd64 --target ros-python-dev \
+  --load -t nexus-ros-core:amd64 .
+docker buildx build --platform linux/arm64 --target ros-python-dev \
+  --load -t nexus-ros-core:arm64 .
+for arch in amd64 arm64; do
+  docker run --rm --platform "linux/$arch" "nexus-ros-core:$arch" bash -lc '
+    source /etc/profile.d/nexus_env.bash
+    test "$(id -un)" = developer && test "$(id -u)" != 0
+    python -c "import sys; assert sys.version_info[:2] == (3, 12)"
+    test "$(uv --version)" = "uv 0.8.3"
+    test "$ROS_DISTRO" = jazzy
+    ros2 pkg prefix demo_nodes_cpp
+    timeout 20s ros2 run demo_nodes_cpp listener > /tmp/listener.log 2>&1 & listener=$!
+    timeout 10s ros2 run demo_nodes_cpp talker >/tmp/talker.log 2>&1 || true
+    wait "$listener" || true
+    grep -q "I heard:" /tmp/listener.log
+  '
+done
 git diff --check main...HEAD
-git status --short
+test -z "$(git status --short)"
 ```
 
-Expected: all tests pass, Compose parses, diff check is empty, worktree is clean.
+Expected: both exact OCI indexes and both runtime architectures pass exact Python 3.12, uv 0.8.3,
+non-root developer, Jazzy, demo package, and talker/listener checks. The core worktree is clean.
 
-- [ ] **Step 2: Build and smoke the lightweight image**
+- [ ] **Step 3: Record host Isaac acceptance or an explicit deferred acceptance**
 
 Run:
 
 ```bash
-docker build --target ros-python-dev -t nexus-ros-core:test .
-docker run --rm nexus-ros-core:test bash -lc \
-  'source /etc/profile.d/nexus_env.bash && test "$ROS_DISTRO" = jazzy && \
-   python --version && uv --version && ros2 pkg prefix demo_nodes_cpp && test "$(id -u)" != 0'
+set +e
+scripts/check_isaac_host.bash
+isaac_status=$?
+set -e
+case "$isaac_status" in
+  0) printf 'host Isaac bridge acceptance PASS\n' ;;
+  77) printf '%s\n' \
+    'SKIP E_PREREQUISITE: rerun scripts/check_isaac_host.bash on the x86_64 NVIDIA Isaac 6.0.1 host' ;;
+  *) exit "$isaac_status" ;;
+esac
 ```
 
-Expected: exit zero, Jazzy visible, Python/uv visible, runtime UID is non-zero.
+Expected: actual topic discovery or one `/clock` observation passes when the host is available.
+Unavailable Isaac is recorded as SKIP with the exact rerun command and is not reported as passed;
+discovery failure with prerequisites present blocks integration. No simulator install/start or
+hardware/motion command is run.
 
-- [ ] **Step 3: Review ownership diff**
+- [ ] **Step 4: Create the exact clean `main` worktree and merge locally without push**
 
-Run:
-
-```bash
-git diff --name-status main...HEAD
-git log --oneline --decorate main..HEAD
-git show migration/pre-split-2026-07-14:Dockerfile.doosan >/dev/null
-git show migration/pre-split-2026-07-14:docs/tutorials/day-06-doosan-a0912-bringup/README.md >/dev/null
-```
-
-Expected: core files changed, vendor/tutorial files are deletions only, preservation tag restores both examples.
-
-- [ ] **Step 4: Merge locally without push**
-
-Create a clean `main` worktree, then run:
+Run exactly from the core worktree:
 
 ```bash
-git merge --no-ff refactor/core-branch-layout \
+CORE_WT=/home/ahrism/workspace/ros2-dev/.worktrees/core-branch-migration
+MAIN_WT=/home/ahrism/workspace/ros2-dev/.worktrees/main-integration
+MAIN_BASE=6bb7f14f748416f64712ce63103bea1b02997fea
+
+test ! -e "$MAIN_WT"
+! git -C "$CORE_WT" worktree list --porcelain | grep -Fx "worktree $MAIN_WT"
+test "$(git -C "$CORE_WT" rev-parse main)" = "$MAIN_BASE"
+test -z "$(git -C "$CORE_WT" status --porcelain)"
+core_head="$(git -C "$CORE_WT" rev-parse HEAD)"
+
+git -C "$CORE_WT" worktree add "$MAIN_WT" main
+test "$(git -C "$MAIN_WT" branch --show-current)" = main
+test "$(git -C "$MAIN_WT" rev-parse HEAD)" = "$MAIN_BASE"
+test -z "$(git -C "$MAIN_WT" status --porcelain)"
+
+git -C "$MAIN_WT" merge --no-ff "$core_head" \
   -m "merge: establish vendor-neutral ROS2 core"
-git status --short --branch
-bash tests/run_all.bash
+bash "$MAIN_WT/tests/run_all.bash"
+test "$(git -C "$MAIN_WT" rev-parse HEAD^1)" = "$MAIN_BASE"
+test "$(git -C "$MAIN_WT" rev-parse HEAD^2)" = "$core_head"
+test -z "$(git -C "$MAIN_WT" status --porcelain)"
 ```
 
-Expected: local `main` contains a merge commit and tests still pass. Do not push.
+Expected: local `main` contains the reviewed merge and remains clean. If the path already exists,
+`main` moved, or either worktree is dirty, stop without removing/reusing/resetting anything. Repeat
+Step 1's protected hashes/status checks after the merge. Do not push, delete a branch, or remove a
+worktree.
 
 ---
 
