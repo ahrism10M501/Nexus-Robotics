@@ -40,7 +40,7 @@ done
 
 - [ ] **Step 2: Verify RED**
 
-Run: `bash tests/test_static_contract.bash`  
+Run: `bash tests/test_static_contract.bash`
 Expected: `missing file: docs/branching.md`.
 
 - [ ] **Step 3: Implement the minimal contract**
@@ -49,7 +49,7 @@ Expected: `missing file: docs/branching.md`.
 
 - [ ] **Step 4: Verify GREEN and commit**
 
-Run: `bash tests/test_static_contract.bash`  
+Run: `bash tests/test_static_contract.bash`
 Expected: `static core contract passed`.
 
 ```bash
@@ -83,7 +83,7 @@ Every `BRANCH.md` has these headings: `Parent and synchronization`, `Owns`, `Doe
 
 - [ ] **Step 3: Verify and commit**
 
-Run: `bash scripts/verify_branch_topology.bash refactor/core-branch-layout`  
+Run: `bash scripts/verify_branch_topology.bash refactor/core-branch-layout`
 Expected: five `PASS` lines.
 
 Commit each `BRANCH.md` independently with a `docs: initialize ... branch` message.
