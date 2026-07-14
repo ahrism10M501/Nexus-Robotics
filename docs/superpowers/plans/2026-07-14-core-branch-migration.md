@@ -69,9 +69,9 @@
 - `tests/test_profiles.bash`: profile parser and generic dispatch contract.
 - `tests/test_compose.bash`: normalized least-privilege Compose contract.
 - `tests/test_doctor.bash`: compact diagnostics and prerequisite failures.
-- `tests/run_all.bash`: deterministic static test entrypoint.
+- `tests/run_all.bash`: deterministic checks/core/full tier entrypoint.
 - `.github/workflows/core-environment.yml`: static, amd64 build/smoke, and arm64 build jobs.
-- `scripts/check_dev_workflow.sh`: user-facing wrapper around the same static tests.
+- `scripts/check_dev_workflow.sh`: user-facing wrapper around the default core tier.
 
 ### Documentation split
 
@@ -1280,43 +1280,61 @@ tree, and the preservation tag contains every one of their blobs.
 
 **Files:**
 - Create: `tests/run_all.bash`
+- Create: `tests/test_ai_runtime.bash`
+- Create: `tests/smoke_core_image.bash`
 - Create: `.github/workflows/core-environment.yml`
+- Modify: `README.md`
+- Modify: `tests/test_docker_runtime.bash`
 - Modify: `tests/test_static_contract.bash`
 - Modify: `scripts/check_dev_workflow.sh`
 
 **Interfaces:**
-- Produces: `tests/run_all.bash`; CI jobs `static`, `build-amd64`, `build-arm64`.
+- Produces: tiered `tests/run_all.bash`, reusable core-image smoke helper, and CI jobs `static`,
+  `build-amd64`, `build-arm64`.
 - Consumes: all Task 2-7 tests and Docker targets.
 
-- [ ] **Step 1: Write the test runner contract**
+- [ ] **Step 1: Split expensive runtime coverage and write the tiered runner contract**
 
-Create `tests/run_all.bash`:
+The current local `ros-ai-dev` image is 14.4 GB, while the standard GitHub-hosted
+`ubuntu-24.04` runner has 14 GB SSD. Do not create a CI job that cannot fit its own loaded image.
+The runner specification is documented at
+<https://docs.github.com/en/actions/reference/runners/github-hosted-runners>.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
-for test_file in \
-  tests/test_static_contract.bash \
-  tests/test_ai_lock.bash \
-  tests/test_docker_runtime.bash \
-  tests/test_init.bash \
-  tests/test_profiles.bash \
-  tests/test_compose.bash \
-  tests/test_doctor.bash \
-  tests/test_isaac_host.bash; do
-  bash "$test_file"
-done
-printf 'all core tests passed\n'
-```
+Keep `tests/test_docker_runtime.bash` core-only: retain both `ros-python-dev` UID/GID fixtures,
+zero-ID rejection, and their runtime checks. Move the existing `ros-ai-dev` build, `uv pip check`,
+and six imports unchanged into `tests/test_ai_runtime.bash`. AI runtime remains an explicit local
+gate until its peak build plus loaded image is proven to fit a standard runner or a separately
+authorized larger runner is selected. CI still validates the universal hashed AI lock for both
+architectures.
 
-Add a static assertion that the workflow contains `linux/amd64`, `linux/arm64`, and
-`tests/run_all.bash`.
+Create `tests/run_all.bash` with exactly three modes:
+
+- `--checks`: run, in order, static contract, init, profiles, doctor, Isaac-host unit acceptance,
+  Compose, OCI image indexes, and AI lock; perform no Docker image build.
+- `--core` or no argument: run `--checks`, then the core-only Docker runtime test last.
+- `--full`: run `--core`, then the AI runtime test last.
+
+Reject every other arity or argument with exit 2 and a one-line usage. The final success line must
+name the executed tier exactly: `core checks passed`, `all core tests passed`, or
+`full core and AI tests passed`. Never report the higher tier when it was skipped. Invoke every
+test with Bash; the test files do not need executable mode.
+
+Extend the static contract to require all three modes, inclusion of
+`tests/test_image_indexes.bash`, separation of the AI block, and the workflow invariants below.
+With a temporary `docker` stub that records any invocation and fails, exercise the smoke helper's
+invalid arity, unsupported platform, platform/machine mismatch, leading-dash tag, and whitespace
+tag cases; require exit 2 and prove the Docker stub was never called.
 
 Now, and only now, change `scripts/check_dev_workflow.sh` from the Task 7 static-test wrapper to
 `exec bash tests/run_all.bash`. Keep the wrapper executable; `tests/run_all.bash` and the individual
 test files are invoked with Bash and do not need executable mode.
+
+Update `README.md` with the persistent operator contract: `scripts/check_dev_workflow.sh` selects
+the default `--core` tier; `bash tests/run_all.bash --full` is the explicit complete local gate;
+the 14.4 GB AI runtime image is intentionally excluded from standard CI and requires substantial
+local disk; CI still verifies the universal hashed AI lock and architecture-specific wheel
+selection for both amd64 and arm64. Keep this explanation concise and do not expose migration-only
+history in the onboarding path.
 
 - [ ] **Step 2: Verify RED**
 
@@ -1331,6 +1349,8 @@ setup action and its execution substrate to these exact observed values:
 
 ```yaml
 - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+  with:
+    persist-credentials: false
 - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130
   with:
     image: tonistiigi/binfmt@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0
@@ -1339,53 +1359,119 @@ setup action and its execution substrate to these exact observed values:
   with:
     version: v0.35.0
     driver-opts: image=moby/buildkit@sha256:0168606be2315b7c807a03b3d8aa79beefdb31c98740cebdffdfeebf31190c9f
+    buildkitd-flags: --debug
 - uses: docker/setup-compose-action@2fe291b7677a45ee1269ec56a42604c143505e7e
   with:
     version: v2.30.3
 ```
 
-These are the controller-observed CI substrate values, not floating examples. After setup, assert
-`docker compose version --short` is exactly `2.30.3`, run
-`tests/test_image_indexes.bash`, and run the unified tests. Set up QEMU for arm64 and Buildx
-explicitly. Build `ros-python-dev` separately for `linux/amd64` and `linux/arm64`, load each local
-single-platform image without publishing, then run each image with its matching `--platform`.
-Arm64 runtime must execute through QEMU or a native runner; build-only coverage is insufficient.
+These are the controller-observed CI substrate values, not floating examples. Set top-level
+`permissions: {contents: read}` and `DOCKER_BUILDKIT=1`; every checkout disables persisted
+credentials. Do not use `pull_request_target`, secrets, registry login, artifacts, a self-hosted
+runner, or any unpinned action. Give every job and runtime-smoke step a bounded timeout. Supplying
+`buildkitd-flags: --debug` intentionally removes the action's default insecure/network-host
+entitlements; neither entitlement is allowed.
 
-For both platforms verify:
+Use the three exact job IDs as follows:
+
+1. `static`: pinned Buildx and Compose setup, literal
+   `test "$(docker compose version --short)" = '2.30.3'`, then
+   `bash tests/run_all.bash --checks`. It does not build a Docker image.
+2. `build-amd64`: `needs: static`; pinned Buildx; build/load only `ros-python-dev` for
+   `linux/amd64`, prune Buildx cache after load, inspect the loaded architecture, then run the
+   bounded amd64 smoke.
+3. `build-arm64`: `needs: static`; pinned QEMU before pinned Buildx; build/load only
+   `ros-python-dev` for `linux/arm64`, prune Buildx cache after load, inspect the loaded
+   architecture, then run the bounded arm64 smoke under QEMU.
+
+Each platform has its own ephemeral job. Before setup, remove preinstalled Docker data with
+`docker system prune --all --force --volumes`; never delete host paths. Do not invoke the generic
+Docker runtime test in a platform job because it builds host-default images and duplicates disk
+usage. Build with `--pull --load`, a fixed local tag, and no cache export or publication. Immediately
+after the image is loaded, run `docker buildx prune --all --force` before inspection/smoke. Add an
+`if: failure()` diagnostic step to each build job that runs both `df -h` and `docker system df`
+without mutating the runner.
+
+Create `tests/smoke_core_image.bash` as the single implementation of the platform runtime proof.
+It accepts exactly `<platform> <tag> <expected-machine>`, rejects invalid arity, and permits only
+the matching pairs `linux/amd64` + `x86_64` or `linux/arm64` + `aarch64`. Reject a tag that starts
+with `-` or contains anything outside a conservative Docker-reference character set before passing
+it to the CLI, so the tag cannot inject an option. Before running, the helper uses
+`docker image inspect --format '{{.Os}}/{{.Architecture}}'` and requires the exact requested
+platform. It then verifies inside the container:
 
 ```bash
 test "$(id -un)" = developer
 test "$(id -u)" != 0
+test "$(uname -m)" = x86_64  # aarch64 in the arm64 job
 python -c 'import sys; assert sys.version_info[:2] == (3, 12)'
 test "$(uv --version)" = 'uv 0.8.3'
 ros2 pkg prefix demo_nodes_cpp
 test "$ROS_DISTRO" = jazzy
 ```
 
-Also start `demo_nodes_cpp` listener and talker within a bounded-time container smoke and require
-at least one `I heard:` line on each platform. Stop the processes afterward; no runtime Docker
-socket is mounted.
+Run with matching `--platform`, `--pull=never`, `--rm`, `--init`, a fixed platform-specific
+`--name`, `--cap-drop=ALL`, and
+`--security-opt=no-new-privileges`; do not add mounts, devices, host networking, privilege, or a
+Docker socket. A missing local tag must fail instead of pulling from a registry.
 
-No job may build vendor targets, push images, mount Docker socket into a runtime service, or run
-hardware commands.
+Start `demo_nodes_cpp` listener and talker as background processes inside the same bounded
+container, poll to a fixed deadline for at least one `I heard:` line, and use an in-container
+EXIT/INT/TERM trap that terminates and waits for both PIDs. Pass a fixed script and the expected
+machine as positional data to `bash`; never interpolate the tag, platform, or expected machine into
+the in-container shell program. Wrap `docker run` in host `timeout --kill-after`, and use an outer
+EXIT/INT/TERM trap that removes the fixed smoke container name if the client or step times out.
+CI calls this helper after each build/load/prune. QEMU setup plus the helper's matching
+`docker run --platform linux/arm64` and `uname -m=aarch64` is the execution proof; a cross-build
+alone is insufficient.
+
+The static test must verify exact job IDs, triggers, permissions, runner labels, `needs` edges,
+checkout hardening, every full action SHA/input/digest, QEMU-before-Buildx order, literal Compose
+version assertion, both exact build/load/run/architecture paths, runtime security flags, bounded
+timeouts and cleanup traps, and the runner modes. Allow-list every `uses:` value. Confirm
+`.dockerignore` has exact `.git`, `.github`, and `.env` records.
+
+Require exactly eight `uses:` entries with this distribution: checkout three times, Buildx three
+times, QEMU once, and Compose once. Every entry must equal one of the four approved full-SHA values;
+no prefix or substring match is sufficient. Make forbidden-command assertions against exact risky
+constructs such as `${{ secrets.`, `docker/login-action`, `ros2 topic pub`, `ros2 service call`,
+`ros2 action send_goal`, `docker login`, `--network=host`, `--network host`, `--net=host`,
+`--allow security.insecure`, `--allow=security.insecure`, and `--allow=network.host`, rather than
+generic words such as `secrets`, `service`, or `action` that also occur in safe YAML. The secrets
+pattern must tolerate optional YAML-expression whitespace so both `${{ secrets.X }}` and
+`${{secrets.X}}` are rejected.
+
+Reject from the workflow: floating/unapproved actions, `pull_request_target`, login or secrets,
+artifacts, `docker push`, `--push`, `push: true`, vendor targets/tokens, AI runtime build,
+Docker-socket mounts, `--privileged`, devices or `/dev/`, host network, insecure BuildKit
+entitlements, simulator install/launch, NVIDIA/X11 setup, and ROS publish/service/action commands.
 
 - [ ] **Step 4: Verify GREEN and commit**
 
 Run:
 
 ```bash
-bash tests/run_all.bash
+bash tests/run_all.bash --full
+set +e
+bash tests/run_all.bash invalid >/dev/null 2>&1
+invalid_status=$?
+set -e
+test "$invalid_status" -eq 2
 test -x scripts/check_dev_workflow.sh
 git diff --check
-git add tests/run_all.bash tests/test_static_contract.bash \
-  scripts/check_dev_workflow.sh .github/workflows/core-environment.yml
+git add README.md tests/run_all.bash tests/test_ai_runtime.bash \
+  tests/smoke_core_image.bash tests/test_docker_runtime.bash \
+  tests/test_static_contract.bash scripts/check_dev_workflow.sh \
+  .github/workflows/core-environment.yml
 git commit -m "ci: verify portable core environment"
 ```
 
-Expected: `all core tests passed`; both exact OCI indexes expose amd64+arm64, QEMU/native arm64 and
-amd64 runtime smokes pass with exact Python/uv/Jazzy/non-root checks and talker/listener exchange,
-and Compose is exactly 2.30.3. The workflow contains no push, vendor target, simulator install,
-runtime Docker-socket mount, or hardware-control command.
+Expected locally: `full core and AI tests passed`; the invalid mode exits 2; the everyday wrapper
+selects core rather than the 14.4 GB AI tier. Expected in CI: checks plus both exact OCI indexes pass;
+amd64 and QEMU arm64 runtime smokes prove architecture, exact Python/uv/Jazzy/non-root behavior and
+talker/listener exchange; Compose is exactly 2.30.3. The workflow never builds AI/vendor targets,
+pushes, weakens BuildKit/runtime isolation, mounts the Docker socket, or runs simulator/hardware
+commands.
 
 ---
 
@@ -1404,6 +1490,7 @@ runtime Docker-socket mount, or hardware-control command.
 Run:
 
 ```bash
+set -euo pipefail
 BACKUP=/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14
 ROOT=/home/ahrism/workspace/ros2-dev
 FEATURE="$ROOT/.worktrees/team-shared-dev-env"
@@ -1471,8 +1558,7 @@ integration without cleanup/reset/stash.
 Run:
 
 ```bash
-bash tests/run_all.bash
-bash tests/test_image_indexes.bash
+set -euo pipefail
 compose_version="$(docker compose version --short)"
 compose_version="${compose_version#v}"
 test "$(printf '%s\n' 2.30.0 "$compose_version" | sort -V | head -n1)" = 2.30.0
@@ -1482,47 +1568,81 @@ docker compose --env-file docker/versions.env --env-file .env.example \
 ROS_PIN='ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f'
 if test "$(uname -m)" = aarch64; then
   printf 'arm64 runtime preflight: native\n'
-elif docker run --rm --platform linux/arm64 "$ROS_PIN" bash -lc true; then
-  printf 'arm64 runtime preflight: existing QEMU/binfmt\n'
 else
-  printf '%s\n' \
-    'HOLD E_PREREQUISITE: no native/QEMU arm64 execution; request explicit authority before privileged binfmt registration' >&2
-  exit 1
+  if ! timeout --kill-after=10s 300s \
+    docker pull --platform linux/arm64 "$ROS_PIN"; then
+    printf '%s\n' \
+      'FAIL E_ARM64_IMAGE: bounded arm64 preflight image pull failed; check network and Docker disk, then retry' >&2
+    exit 1
+  fi
+
+  arm_preflight_name=nexus-arm64-preflight
+  if docker container inspect "$arm_preflight_name" >/dev/null 2>&1; then
+    printf '%s\n' \
+      "FAIL E_STALE_CONTAINER: $arm_preflight_name already exists; inspect it and remove it explicitly before retrying" >&2
+    exit 1
+  fi
+  cleanup_arm_preflight() {
+    timeout --kill-after=2s 10s \
+      docker rm -f "$arm_preflight_name" >/dev/null 2>&1 || true
+  }
+  trap cleanup_arm_preflight EXIT INT TERM
+  set +e
+  timeout --kill-after=5s 30s docker run \
+    --pull=never --rm --init --name "$arm_preflight_name" \
+    --platform linux/arm64 --cap-drop=ALL \
+    --security-opt=no-new-privileges \
+    "$ROS_PIN" bash -lc 'test "$(uname -m)" = aarch64'
+  arm_preflight_status=$?
+  set -e
+  if test "$arm_preflight_status" -ne 0; then
+    printf '%s\n' \
+      'HOLD E_PREREQUISITE: pinned arm64 execution failed after a successful pull; request explicit authority before privileged binfmt registration' >&2
+    exit 1
+  fi
+  trap - EXIT INT TERM
+  cleanup_arm_preflight
+  printf 'arm64 runtime preflight: existing QEMU/binfmt\n'
 fi
 
-docker buildx build --platform linux/amd64 --target ros-python-dev \
-  --load -t nexus-ros-core:amd64 .
-docker buildx build --platform linux/arm64 --target ros-python-dev \
-  --load -t nexus-ros-core:arm64 .
-for arch in amd64 arm64; do
-  docker run --rm --platform "linux/$arch" "nexus-ros-core:$arch" bash -lc '
-    source /etc/profile.d/nexus_env.bash
-    test "$(id -un)" = developer && test "$(id -u)" != 0
-    python -c "import sys; assert sys.version_info[:2] == (3, 12)"
-    test "$(uv --version)" = "uv 0.8.3"
-    test "$ROS_DISTRO" = jazzy
-    ros2 pkg prefix demo_nodes_cpp
-    timeout 20s ros2 run demo_nodes_cpp listener > /tmp/listener.log 2>&1 & listener=$!
-    timeout 10s ros2 run demo_nodes_cpp talker >/tmp/talker.log 2>&1 || true
-    wait "$listener" || true
-    grep -q "I heard:" /tmp/listener.log
-  '
-done
+bash tests/run_all.bash --full
+bash tests/test_image_indexes.bash
+report_local_docker_disk() {
+  timeout --kill-after=5s 30s docker buildx du || true
+  timeout --kill-after=5s 30s docker system df || true
+}
+if ! docker buildx build --pull --platform linux/amd64 --target ros-python-dev \
+  --load -t nexus-ros-core:amd64 .; then
+  report_local_docker_disk
+  exit 1
+fi
+bash tests/smoke_core_image.bash linux/amd64 nexus-ros-core:amd64 x86_64
+
+if ! docker buildx build --pull --platform linux/arm64 --target ros-python-dev \
+  --load -t nexus-ros-core:arm64 .; then
+  report_local_docker_disk
+  exit 1
+fi
+bash tests/smoke_core_image.bash linux/arm64 nexus-ros-core:arm64 aarch64
 git diff --check main...HEAD
 test -z "$(git status --short)"
 ```
 
-Expected: both exact OCI indexes and both runtime architectures pass exact Python 3.12, uv 0.8.3,
-non-root developer, Jazzy, demo package, and talker/listener checks. Local Compose is semantically
-at least 2.30.0; exact 2.30.3 is a CI-only assertion. If native/QEMU arm64 execution is absent—as
-on the current host—HOLD before any build/merge and request explicit authority for privileged
-binfmt setup. Never auto-register binfmt; Task 8 CI remains the authoritative arm64 runtime smoke.
+Expected: both exact OCI indexes and both runtime architectures pass the same reusable helper used
+by CI: exact loaded platform and `uname -m`, Python 3.12, uv 0.8.3, non-root developer, Jazzy, demo
+package, restricted runtime flags, bounded cleanup, and talker/listener exchange. Local Compose is
+semantically at least 2.30.0; exact 2.30.3 is a CI-only assertion. If native/QEMU arm64 execution is
+absent—as on the current host—HOLD before any build/merge and request explicit authority for
+privileged binfmt setup. Never auto-register binfmt; Task 8 CI remains the authoritative arm64
+runtime smoke. Task 9 never prunes the shared local Buildx cache; a local build failure reports
+bounded `docker buildx du` and `docker system df` diagnostics and stops.
 
 - [ ] **Step 3: Record host Isaac acceptance or an explicit deferred acceptance**
 
 Run:
 
 ```bash
+set -euo pipefail
 set +e
 scripts/check_isaac_host.bash
 isaac_status=$?
@@ -1546,9 +1666,13 @@ hardware/motion command is run.
 Run exactly from the core worktree:
 
 ```bash
+set -euo pipefail
 CORE_WT=/home/ahrism/workspace/ros2-dev/.worktrees/core-branch-migration
 MAIN_WT=/home/ahrism/workspace/ros2-dev/.worktrees/main-integration
 MAIN_BASE=6bb7f14f748416f64712ce63103bea1b02997fea
+BACKUP=/home/ahrism/workspace/ros2-dev-migration-backup-2026-07-14
+ROOT=/home/ahrism/workspace/ros2-dev
+FEATURE="$ROOT/.worktrees/team-shared-dev-env"
 
 test ! -e "$MAIN_WT"
 ! git -C "$CORE_WT" worktree list --porcelain | grep -Fx "worktree $MAIN_WT"
@@ -1563,16 +1687,73 @@ test -z "$(git -C "$MAIN_WT" status --porcelain)"
 
 git -C "$MAIN_WT" merge --no-ff "$core_head" \
   -m "merge: establish vendor-neutral ROS2 core"
-bash "$MAIN_WT/tests/run_all.bash"
+bash "$MAIN_WT/tests/run_all.bash" --full
 test "$(git -C "$MAIN_WT" rev-parse HEAD^1)" = "$MAIN_BASE"
 test "$(git -C "$MAIN_WT" rev-parse HEAD^2)" = "$core_head"
+test "$(git -C "$MAIN_WT" rev-parse HEAD^{tree})" = \
+  "$(git -C "$CORE_WT" rev-parse "$core_head^{tree}")"
 test -z "$(git -C "$MAIN_WT" status --porcelain)"
+
+# Re-run the external preservation contract after the merge in this fresh shell.
+test "$(git -C "$MAIN_WT" rev-parse migration/pre-split-2026-07-14^{})" = \
+  6bb7f14f748416f64712ce63103bea1b02997fea
+test "$(sha256sum "$BACKUP/manifest.txt" | awk '{print $1}')" = \
+  39478896d14aefd7c1f40b46a3117974d45917811d90c108818ccc5cb2df92da
+test "$(sha256sum "$BACKUP/user-damin.patch" | awk '{print $1}')" = \
+  a44a513e33fe4a31f3eab5b1c878d4dee0169afadc52b2e77bc8306a67bb95f4
+
+manifest_value() { sed -n "s/^$2=//p" "$1"; }
+verify_worktree_manifest() {
+  local manifest="$1" manifest_sha="$2" wt expected actual line record path file_sha
+  test "$(sha256sum "$manifest" | awk '{print $1}')" = "$manifest_sha"
+  wt="$(manifest_value "$manifest" worktree)"
+  expected="$(manifest_value "$manifest" head)"
+  test "$(git -C "$wt" rev-parse HEAD)" = "$expected"
+  expected="$(manifest_value "$manifest" status_porcelain_v1_z_sha256)"
+  actual="$(git -C "$wt" status --porcelain=v1 -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" tracked_binary_diff_sha256)"
+  actual="$(git -C "$wt" diff --binary | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  expected="$(manifest_value "$manifest" untracked_paths_z_sha256)"
+  actual="$(git -C "$wt" ls-files --others --exclude-standard -z | sha256sum | awk '{print $1}')"
+  test "$actual" = "$expected"
+  while IFS= read -r line; do
+    case "$line" in
+      tracked_sha256=*|untracked_sha256=*)
+        record="${line%%  *}"
+        path="${line#*  }"
+        file_sha="${record#*=}"
+        test -f "$wt/$path"
+        test "$(sha256sum "$wt/$path" | awk '{print $1}')" = "$file_sha"
+        ;;
+    esac
+  done < "$manifest"
+}
+
+test "$(manifest_value "$BACKUP/root-worktree.manifest" head)" = \
+  744a8a9bda98dd6b7fd50a0703bf6fefab981bc5
+test "$(manifest_value "$BACKUP/feature-worktree.manifest" head)" = \
+  bbce9bdb91a76ed57755542586bfcd6e0af61ba9
+verify_worktree_manifest "$BACKUP/root-worktree.manifest" \
+  ebd801615fe1d523757048ba1f6f884f57956af7181a74f99cc3e7fc3a0e3780
+verify_worktree_manifest "$BACKUP/feature-worktree.manifest" \
+  09a318b77f6447e78ca9801db3f4ba7583f54c5dd0edaeaa5ea07fd3190eeb5e
+test -f "$ROOT/user-ws/damin/tutorial-7.py"
+while IFS= read -r path; do
+  test ! -e "$MAIN_WT/$path"
+  git -C "$MAIN_WT" cat-file -e "migration/pre-split-2026-07-14:$path"
+done < "$MAIN_WT/tests/fixtures/core-deleted-paths.txt"
+test -z "$(git -C "$MAIN_WT" status --porcelain)"
+git -C "$ROOT" status --short --branch
+git -C "$FEATURE" status --short --branch
 ```
 
 Expected: local `main` contains the reviewed merge and remains clean. If the path already exists,
-`main` moved, or either worktree is dirty, stop without removing/reusing/resetting anything. Repeat
-Step 1's protected hashes/status checks after the merge. Do not push, delete a branch, or remove a
-worktree.
+`main` moved, or either worktree is dirty, stop without removing/reusing/resetting anything. The
+merge tree must equal the reviewed core tree; the full tier, every external manifest/status/file
+hash, and all 31 preservation-tag blobs are actually revalidated after the merge. Do not push,
+delete a branch, or remove a worktree.
 
 ---
 
