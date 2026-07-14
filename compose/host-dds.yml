@@ -1,0 +1,5 @@
+services:
+  ros2_dev:
+    network_mode: host
+  ai_dev:
+    network_mode: host

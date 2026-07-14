@@ -1,90 +1,42 @@
+x-build-args: &build-args
+  ROS_BASE_IMAGE: "${ROS_BASE_IMAGE:-ros:jazzy-ros-base-noble@sha256:31daab66eef9139933379fb67159449944f4e2dcf2e22c2d12cc715f29873e0f}"
+  UV_IMAGE: "${UV_IMAGE:-ghcr.io/astral-sh/uv:0.8.3@sha256:ef11ed817e6a5385c02cd49fdcc99c23d02426088252a8eace6b6e6a2a511f36}"
+  DEVELOPER_UID: "${LOCAL_UID:-1000}"
+  DEVELOPER_GID: "${LOCAL_GID:-1000}"
+
+x-build: &build
+  context: .
+  dockerfile: Dockerfile
+  args: *build-args
+
+x-non-root-service: &non-root-service
+  user: developer
+  init: true
+  stdin_open: true
+  tty: true
+  environment:
+    ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-42}"
+    RMW_IMPLEMENTATION: "${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}"
+    FASTDDS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
+    FASTRTPS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
+  volumes:
+    - type: bind
+      source: .
+      target: /workspace
+      bind:
+        create_host_path: false
+
 services:
   ros2_dev:
+    <<: *non-root-service
     build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: ros2_ai_workspace
+      <<: *build
+      target: ros-python-dev
 
-    stdin_open: true
-    tty: true
-
-    network_mode: "host"
-    ipc: host
-    pid: host
-    gpus: all
-
-    environment:
-      DISPLAY: ${DISPLAY}
-      QT_X11_NO_MITSHM: "1"
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
-      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-      FASTDDS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      FASTRTPS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: all
-
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - .:/workspace:rw
-
-  doosan_dev:
-    build:
-      context: .
-      dockerfile: Dockerfile.doosan
-    container_name: ros2_doosan_workspace
+  ai_dev:
+    <<: *non-root-service
     profiles:
-      - doosan
-
-    stdin_open: true
-    tty: true
-
-    network_mode: "host"
-    ipc: host
-    pid: host
-    gpus: all
-
-    environment:
-      DISPLAY: ${DISPLAY}
-      QT_X11_NO_MITSHM: "1"
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
-      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-      FASTDDS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      FASTRTPS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: all
-
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /var/run/docker.sock:/var/run/docker.sock
-      - .:/workspace:rw
-
-  full_dev:
+      - ai
     build:
-      context: .
-      dockerfile: Dockerfile.isaac-moveit
-    container_name: ros2_full_workspace
-    profiles:
-      - full
-
-    stdin_open: true
-    tty: true
-
-    network_mode: "host"
-    ipc: host
-    pid: host
-    gpus: all
-
-    environment:
-      DISPLAY: ${DISPLAY}
-      QT_X11_NO_MITSHM: "1"
-      ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-42}
-      RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-      FASTDDS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      FASTRTPS_DEFAULT_PROFILES_FILE: /workspace/config/fastdds.xml
-      NVIDIA_VISIBLE_DEVICES: all
-      NVIDIA_DRIVER_CAPABILITIES: all
-
-    volumes:
-      - /tmp/.X11-unix:/tmp/.X11-unix:rw
-      - /var/run/docker.sock:/var/run/docker.sock
-      - .:/workspace:rw
+      <<: *build
+      target: ros-ai-dev
