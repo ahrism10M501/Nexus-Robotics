@@ -277,6 +277,18 @@ run_check "$root" ISAAC_SIM_ROOT="$root/absent"
 assert_skip 'missing Isaac root' 'Isaac Sim root'
 
 root="$(new_fixture)"
+invalid_root="$root/regular-file-root"
+: > "$invalid_root"
+run_check "$root" ISAAC_SIM_ROOT="$invalid_root"
+assert_fail 'regular-file Isaac root' 'Isaac Sim root'
+
+root="$(new_fixture)"
+invalid_root="$root/dangling-root"
+ln -s "$root/missing-symlink-target" "$invalid_root"
+run_check "$root" ISAAC_SIM_ROOT="$invalid_root"
+assert_fail 'dangling-symlink Isaac root' 'Isaac Sim root'
+
+root="$(new_fixture)"
 rm "$root/home/isaacsim/isaac-sim.sh"
 run_check "$root"
 assert_skip 'missing launcher path' 'Isaac Sim launcher'

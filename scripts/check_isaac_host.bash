@@ -35,8 +35,12 @@ nexus_check_isaac_host_main() {
     nexus_acceptance_skip 'HOME is required for the Isaac Sim fallback root' 'export HOME=/home/your-user'
     return
   fi
-  [[ -d "$ISAAC_SIM_ROOT" ]] || {
+  [[ -e "$ISAAC_SIM_ROOT" || -L "$ISAAC_SIM_ROOT" ]] || {
     nexus_acceptance_skip 'Isaac Sim root is absent' 'export ISAAC_SIM_ROOT=/path/to/isaacsim'
+    return
+  }
+  [[ -d "$ISAAC_SIM_ROOT" ]] || {
+    nexus_acceptance_fail 'Isaac Sim root is not a directory' 'export ISAAC_SIM_ROOT=/path/to/isaacsim'
     return
   }
   [[ -e "$ISAAC_SIM_ROOT/isaac-sim.sh" || -L "$ISAAC_SIM_ROOT/isaac-sim.sh" ]] || {
