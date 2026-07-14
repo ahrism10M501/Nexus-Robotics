@@ -104,6 +104,7 @@ done
 assert_contains Dockerfile 'USER developer'
 assert_contains Dockerfile 'COPY --from=uv-bin /uv /uvx /usr/local/bin/'
 assert_contains Dockerfile 'ros-jazzy-desktop'
+assert_contains Dockerfile 'ros-jazzy-simulation-interfaces'
 assert_contains Dockerfile 'uv pip sync --require-hashes'
 assert_contains Dockerfile 'uv pip check'
 assert_not_contains Dockerfile 'ARG DEVELOPER_NAME'
