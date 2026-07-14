@@ -1,20 +1,19 @@
-# open-arm Branch
+# openarm-tutorial Branch
 
 ## Parent and synchronization
 
-Parent: `main`. This branch temporarily starts from `refactor/core-branch-layout`
-until core PR #1 merges. Merge parent updates into this branch; do not rebase it or
-merge from another robot branch.
+Parent: `open-arm`. Merge updates from that parent into this branch; do not merge this
+tutorial branch back into its parent or into `main`.
 
 ## Owns
 
-Pinned OpenArm ROS2/CAN source, OpenArm robot description and control integration,
-SocketCAN/vcan separation, and OpenArm-specific MoveIt/RViz profiles.
+OpenArm-specific learning days, reproducible launch examples, optional scene assets, and
+checkpoint instructions that use the parent branch's supported runtime.
 
 ## Does not own
 
-Core Docker/DDS behavior, Doosan code, shared tutorial infrastructure, or inferred
-hardware constants. Shared runtime needs are proposed to `main` as generic interfaces.
+OpenArm drivers, CAN behavior, Docker/Compose profiles, core infrastructure, or any
+Doosan content. Fix runtime defects in `open-arm` first and merge them here.
 
 ## Safe start
 
@@ -23,8 +22,8 @@ hardware constants. Shared runtime needs are proposed to `main` as generic inter
 ./run.sh doctor
 ```
 
-OpenArm profile commands will be introduced only with a pinned and tested branch-local
-runtime PR.
+Follow only tutorial steps documented after a matching `open-arm` runtime PR has
+supplied its profile and launch commands.
 
 ## Verification
 
@@ -32,10 +31,10 @@ runtime PR.
 bash tests/run_all.bash --checks
 ```
 
-Future CAN checks must use a non-transmitting virtual interface before any manual HIL.
+Each future lesson must include a non-transmitting checkpoint before its manual CAN or
+robot step.
 
 ## Hardware safety
 
-No command in the current branch may enable, home, calibrate, or move an OpenArm. CAN
-identifiers, joint limits, and safety state must come from verified upstream sources and
-an operator-approved manual procedure.
+Tutorial text must not provide automatic enable, calibration, home, or motion commands.
+Physical robot steps require a separate operator-approved HIL checklist.
