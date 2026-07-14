@@ -1,34 +1,33 @@
-# 튜토리얼
+# ROS2 Jazzy + Host Isaac Sim 튜토리얼
 
-ROS2 Jazzy, Isaac Sim, Doosan A0912 학습 경로의 중심 문서입니다.
-Day 폴더를 순서대로 따라가세요. 각 Day에는 짧은 `README.md`와
-`concepts.md`, `hands-on.md`, `checkpoint.md`가 있습니다.
+이 인덱스는 vendor-neutral core 과정과 로봇별 확장 과정의 소유권을 나눕니다.
+`main`에는 모든 확장이 공통으로 재사용하는 기초 과정만 둡니다.
 
-## 일차별 학습 경로
+## Core 과정
 
-| Day | 튜토리얼 | 초점 |
+| 순서 | 과정 | 결과 |
 | --- | --- | --- |
-| 1 | [Isaac Sim 기본기](day-01-isaac-sim-basics/README.md) | 작은 physics scene을 만들고, robot을 살펴본 뒤 joint 하나를 움직입니다. |
-| 2 | [Jetbot/TurtleBot ROS2 주행](day-02-jetbot-turtlebot-ros2-driving/README.md) | Isaac Sim을 ROS2와 연결하고 `/cmd_vel`로 mobile robot을 움직입니다. |
-| 3 | [Python Scripting 최소 루프](day-03-python-scripting-minimum-loop/README.md) | Isaac Sim scripting loop를 실행하고 scene lifecycle code를 찾습니다. |
-| 4 | [ROS2 Bridge 관측 파이프라인](day-04-ros2-bridge-observation-pipeline/README.md) | `/clock`, camera data를 publish하고 ROS2에서 QoS를 확인합니다. |
-| 5 | [A0912 전에 배우는 로봇팔 개념](day-05-manipulator-concepts-before-a0912/README.md) | joint state, command topic, MoveIt2, simulator actuation을 배웁니다. |
-| 6 | [Doosan A0912 Bringup 실행](day-06-doosan-a0912-bringup/README.md) | A0912를 virtual mode로 bringup하고 controller를 확인합니다. |
-| 7 | [A0912 Scripted Motion 실행](day-07-a0912-scripted-motion/README.md) | 저속 scripted arm motion을 실행하고 policy action format을 정합니다. |
-| 8 | [Cube-Pick Scene v0 만들기](day-08-cube-pick-scene-v0/README.md) | deterministic cube-pick scene을 만들고 정렬된 task state를 샘플링합니다. |
-| 9 | [데이터셋 수집](day-09-dataset-collection/README.md) | 첫 cube-pick demonstration episode를 저장하고 replay합니다. |
-| 10 | [Policy 연결 준비](day-10-policy-connection-preparation/README.md) | policy process 경계와 real robot safety gate를 정의합니다. |
+| 1 | [Isaac Sim 기본기](day-01-isaac-sim-basics/README.md) | stage, prim, physics, articulation을 설명합니다. |
+| 2 | [Jetbot/TurtleBot ROS2 주행](day-02-jetbot-turtlebot-ros2-driving/README.md) | ROS2 velocity command가 simulation motion으로 이어집니다. |
+| 3 | [Python Scripting 최소 루프](day-03-python-scripting-minimum-loop/README.md) | scene 생성, update, reset 흐름을 코드로 읽습니다. |
+| 4 | [ROS2 Bridge 관측 파이프라인](day-04-ros2-bridge-observation-pipeline/README.md) | `/clock`, RGB, camera metadata를 ROS2에서 관측합니다. |
 
-## 공통 문서
+시작하기 전에 [공통 환경 설정](shared/environment-setup.md)을 확인하고, 각 과정의
+개념 → 실습 → 체크포인트 순서로 진행합니다.
 
-- [공통 튜토리얼 문서](shared/README.md)
-- [Cube-pick v1 데이터셋과 policy interface](shared/cube-pick-v1-dataset-policy-interface.md)
-- [나중에 볼 마일스톤](shared/later-milestones.md)
+## 확장 과정 소유권
+
+Days 5-10은 `main`에 두지 않습니다.
+
+- `doosan-tutorial`: `doosan-robotics` 통합을 기반으로 한 Days 5-10
+- `openarm-tutorial`: `open-arm` 통합을 기반으로 한 Days 5-10
+
+필요한 로봇을 선택해 해당 브랜치로 전환한 뒤 그 브랜치의 이 인덱스를 따릅니다.
+Core 문서가 특정 vendor의 SDK, service 이름 또는 runtime 경로를 전제해서는 안 됩니다.
+
+## 공통 참고
+
+- [공통 문서 안내](shared/README.md)
+- [공식 튜토리얼 연결](shared/official-tutorial-map.md)
+- [용어집](shared/glossary.md)
 - [문제 해결](shared/troubleshooting.md)
-
-## 호환 링크
-
-기존 bookmark가 깨지지 않도록 오래된 진입점은 index로 남겨 둡니다:
-
-- [2주 Isaac Sim + ROS2 + A0912 온보딩](2-week-isaac-ros2-a0912-onboarding.md)
-- [Cube-pick 데이터셋과 policy interface](cube-pick-dataset-interface.md)

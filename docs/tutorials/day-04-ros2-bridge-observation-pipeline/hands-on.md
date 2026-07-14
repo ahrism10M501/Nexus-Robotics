@@ -25,14 +25,14 @@ container에서 `/clock`, `/rgb`, `/camera_info`를 inspect하고, RViz가 `/clo
 host에서 Isaac Sim을 실행합니다.
 
 ```bash
-cd /home/ahrism/workspace/ros2-dev
+cd "$REPO_ROOT"
 ./scripts/launch_isaac_sim.sh
 ```
 
 다른 terminal에서는 기본 ROS2 container를 시작하고 shell로 들어갑니다.
 
 ```bash
-cd /home/ahrism/workspace/ros2-dev
+cd "$REPO_ROOT"
 ./run.sh dev
 ```
 

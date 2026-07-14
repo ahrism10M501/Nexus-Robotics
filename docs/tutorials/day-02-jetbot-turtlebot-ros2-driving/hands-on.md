@@ -23,14 +23,14 @@ robot을 천천히 움직입니다. Action Graph에서는 `ROS2 Subscribe Twist`
 host에서 Isaac Sim을 실행합니다.
 
 ```bash
-cd /home/ahrism/workspace/ros2-dev
+cd "$REPO_ROOT"
 ./scripts/launch_isaac_sim.sh
 ```
 
 다른 terminal에서는 기본 ROS2 container를 시작하고 shell로 들어갑니다.
 
 ```bash
-cd /home/ahrism/workspace/ros2-dev
+cd "$REPO_ROOT"
 ./run.sh dev
 ```
 

@@ -44,8 +44,8 @@ ros2 topic info /camera_info -v
 publisher와 subscriber의 reliability, durability, history, depth가 compatible하지 않으면 RViz나
 custom subscriber가 data를 받지 못할 수 있습니다.
 
-## Day 5로 넘어가기 전에
+## 후속 로봇 튜토리얼 브랜치로 넘어가기 전에
 
 Day 4까지 끝나면 Isaac Sim에서 world를 만들고, ROS2 command로 mobile robot을 움직이고, camera와
-time observation을 ROS2로 내보내는 기본 흐름을 경험했습니다. Day 5에서는 manipulator command와
-joint state observation 쪽으로 시야를 옮깁니다.
+time observation을 ROS2로 내보내는 기본 흐름을 경험했습니다. 후속 실습에서는 선택한 robot의
+command와 joint state observation 쪽으로 시야를 옮깁니다.

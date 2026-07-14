@@ -41,4 +41,4 @@ zero stop command를 다시 보냅니다.
 
 Day 2에서는 ready-made scene과 graph를 사용했습니다. Day 3에서는 같은 Isaac Sim world를
 손으로만 만들지 않고 Python으로 다시 만들 수 있는 minimum loop를 읽습니다. 그 준비가 되어야
-Day 8에서 cube-pick scene을 매번 같은 상태로 reset할 수 있습니다.
+후속 실습에서 task scene을 매번 같은 상태로 reset할 수 있습니다.
