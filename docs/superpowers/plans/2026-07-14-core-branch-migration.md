@@ -1325,7 +1325,18 @@ With a temporary `docker` stub that records any invocation and fails, exercise t
 invalid arity, unsupported platform, platform/machine mismatch, leading-dash tag, and whitespace
 tag cases; require exit 2 and prove the Docker stub was never called. Add a second stub case where
 only `docker container inspect <fixed-name>` succeeds: require an `E_STALE_CONTAINER` failure and
-prove the helper calls neither `docker run` nor `docker rm`. This guards cleanup ownership.
+prove the helper calls neither `docker run` nor `docker rm`. Add a name-race case where the initial
+name check reports absent, image inspection succeeds, `docker run` loses the name race without
+writing its `--cidfile`, and cleanup calls no `docker rm`. Finally, make a bounded-run stub write a
+valid owned CID and prove cleanup removes that CID, never the fixed name. These cases guard cleanup
+ownership rather than only command spelling. The stub must write Docker's real cidfile format: a
+raw 64-hex ID with no trailing newline.
+
+The fake-Docker/timeout suite must also cover: run exit 125 and 137, host timeout 124, INT 130, TERM 143,
+success with a missing or malformed cidfile, and a failing `docker rm`. Each nonzero run/signal
+case must keep its original status; success without a valid owned CID must fail `E_CIDFILE`; and a
+cleanup failure may be reported but must never replace the original status. In every case, removal
+is absent or targets only the owned CID.
 
 Now, and only now, change `scripts/check_dev_workflow.sh` from the Task 7 static-test wrapper to
 `exec bash tests/run_all.bash`. Keep the wrapper executable; `tests/run_all.bash` and the individual
@@ -1417,16 +1428,20 @@ Run with matching `--platform`, `--pull=never`, `--rm`, `--init`, a fixed platfo
 `--security-opt=no-new-privileges`; do not add mounts, devices, host networking, privilege, or a
 Docker socket. Before installing any cleanup trap, use `docker container inspect` on the fixed name;
 if it already exists, fail with `E_STALE_CONTAINER` without running or removing it. Only a helper
-invocation that passed this ownership check may install a cleanup trap and remove that name. A
-missing local tag must fail instead of pulling from a registry.
+invocation that passed this ownership check may allocate a private temporary `--cidfile` and install
+a cleanup trap. Cleanup may call `docker rm -f` only with the validated container ID written to that
+cidfile; it must never remove by fixed name. If another process wins the name after the precheck and
+Docker writes no CID, cleanup is a no-op apart from removing the private temporary file/directory.
+A missing local tag must fail instead of pulling from a registry.
 
 Start `demo_nodes_cpp` listener and talker as background processes inside the same bounded
 container, poll to a fixed deadline for at least one `I heard:` line, and use an in-container
 EXIT/INT/TERM trap that terminates and waits for both PIDs. Pass a fixed script and the expected
 machine as positional data to `bash`; never interpolate the tag, platform, or expected machine into
 the in-container shell program. Wrap `docker run` in host `timeout --kill-after`, and use an outer
-EXIT/INT/TERM trap that removes the fixed smoke container name if the client or step times out.
-CI calls this helper after each build/load/prune. QEMU setup plus the helper's matching
+EXIT/INT/TERM trap that removes only the owned CID if the client or step times out. Validate the
+cidfile as one full hexadecimal container ID before using it and preserve the original run/timeout
+status through cleanup. CI calls this helper after each build/load/prune. QEMU setup plus the helper's matching
 `docker run --platform linux/arm64` and `uname -m=aarch64` is the execution proof; a cross-build
 alone is insufficient.
 
@@ -1587,22 +1602,56 @@ else
       "FAIL E_STALE_CONTAINER: $arm_preflight_name already exists; inspect it and remove it explicitly before retrying" >&2
     exit 1
   fi
+  arm_preflight_tmp="$(mktemp -d)"
+  arm_preflight_cidfile="$arm_preflight_tmp/container.cid"
+  arm_preflight_cid=''
   cleanup_arm_preflight() {
-    timeout --kill-after=2s 10s \
-      docker rm -f "$arm_preflight_name" >/dev/null 2>&1 || true
+    local status=$?
+    if test -z "$arm_preflight_cid" && test -s "$arm_preflight_cidfile"; then
+      arm_preflight_cid="$(<"$arm_preflight_cidfile")" || arm_preflight_cid=''
+    fi
+    if [[ "$arm_preflight_cid" =~ ^[0-9a-f]{64}$ ]]; then
+      timeout --kill-after=2s 10s \
+        docker rm -f "$arm_preflight_cid" >/dev/null 2>&1 || true
+    fi
+    rm -f "$arm_preflight_cidfile" || true
+    rmdir "$arm_preflight_tmp" 2>/dev/null || true
+    return "$status"
   }
-  trap cleanup_arm_preflight EXIT INT TERM
+  trap cleanup_arm_preflight EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
   set +e
   timeout --kill-after=5s 30s docker run \
     --pull=never --rm --init --name "$arm_preflight_name" \
+    --cidfile "$arm_preflight_cidfile" \
     --platform linux/arm64 --cap-drop=ALL \
     --security-opt=no-new-privileges \
     "$ROS_PIN" bash -lc 'test "$(uname -m)" = aarch64'
   arm_preflight_status=$?
   set -e
+  if test -s "$arm_preflight_cidfile"; then
+    arm_preflight_cid="$(<"$arm_preflight_cidfile")" || arm_preflight_cid=''
+  fi
   if test "$arm_preflight_status" -ne 0; then
+    if [[ ! "$arm_preflight_cid" =~ ^[0-9a-f]{64}$ ]]; then
+      if test -n "$arm_preflight_cid"; then
+        printf '%s\n' 'FAIL E_CIDFILE: failed arm64 run recorded an invalid container ID' >&2
+      elif docker container inspect "$arm_preflight_name" >/dev/null 2>&1; then
+        printf '%s\n' \
+          "FAIL E_NAME_RACE: $arm_preflight_name appeared after the ownership check; inspect it explicitly" >&2
+      else
+        printf '%s\n' \
+          'FAIL E_ARM64_RUN: arm64 preflight failed before an owned container ID was recorded' >&2
+      fi
+      exit "$arm_preflight_status"
+    fi
     printf '%s\n' \
       'HOLD E_PREREQUISITE: pinned arm64 execution failed after a successful pull; request explicit authority before privileged binfmt registration' >&2
+    exit "$arm_preflight_status"
+  fi
+  if [[ ! "$arm_preflight_cid" =~ ^[0-9a-f]{64}$ ]]; then
+    printf '%s\n' 'FAIL E_CIDFILE: successful arm64 preflight did not record a valid owned container ID' >&2
     exit 1
   fi
   trap - EXIT INT TERM
@@ -1640,7 +1689,10 @@ semantically at least 2.30.0; exact 2.30.3 is a CI-only assertion. If native/QEM
 absent—as on the current host—HOLD before any build/merge and request explicit authority for
 privileged binfmt setup. Never auto-register binfmt; Task 8 CI remains the authoritative arm64
 runtime smoke. Task 9 never prunes the shared local Buildx cache; a local build failure reports
-bounded `docker buildx du` and `docker system df` diagnostics and stops.
+bounded `docker buildx du` and `docker system df` diagnostics and stops. A failed run may request
+binfmt authority only after a valid owned CID proves that Docker created this invocation's
+container; an empty/invalid cidfile or post-check name race is a non-authority FAIL that preserves
+the original status and never removes the unowned name.
 
 - [ ] **Step 3: Record host Isaac acceptance or an explicit deferred acceptance**
 
