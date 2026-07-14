@@ -4,6 +4,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 source tests/helpers/assert.bash
 
+assert_file docs/branching.md
+assert_file scripts/verify_branch_topology.bash
+for branch in isaac-moveit doosan-robotics open-arm doosan-tutorial openarm-tutorial; do
+  assert_contains docs/branching.md "$branch"
+done
+
 assert_file tests/fixtures/core-deleted-paths.txt
 test "$(wc -l < tests/fixtures/core-deleted-paths.txt)" -eq 31 || \
   fail 'core deletion fixture must contain exactly 31 paths'
