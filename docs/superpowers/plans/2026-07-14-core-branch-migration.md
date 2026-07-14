@@ -1323,7 +1323,9 @@ Extend the static contract to require all three modes, inclusion of
 `tests/test_image_indexes.bash`, separation of the AI block, and the workflow invariants below.
 With a temporary `docker` stub that records any invocation and fails, exercise the smoke helper's
 invalid arity, unsupported platform, platform/machine mismatch, leading-dash tag, and whitespace
-tag cases; require exit 2 and prove the Docker stub was never called.
+tag cases; require exit 2 and prove the Docker stub was never called. Add a second stub case where
+only `docker container inspect <fixed-name>` succeeds: require an `E_STALE_CONTAINER` failure and
+prove the helper calls neither `docker run` nor `docker rm`. This guards cleanup ownership.
 
 Now, and only now, change `scripts/check_dev_workflow.sh` from the Task 7 static-test wrapper to
 `exec bash tests/run_all.bash`. Keep the wrapper executable; `tests/run_all.bash` and the individual
@@ -1413,7 +1415,10 @@ test "$ROS_DISTRO" = jazzy
 Run with matching `--platform`, `--pull=never`, `--rm`, `--init`, a fixed platform-specific
 `--name`, `--cap-drop=ALL`, and
 `--security-opt=no-new-privileges`; do not add mounts, devices, host networking, privilege, or a
-Docker socket. A missing local tag must fail instead of pulling from a registry.
+Docker socket. Before installing any cleanup trap, use `docker container inspect` on the fixed name;
+if it already exists, fail with `E_STALE_CONTAINER` without running or removing it. Only a helper
+invocation that passed this ownership check may install a cleanup trap and remove that name. A
+missing local tag must fail instead of pulling from a registry.
 
 Start `demo_nodes_cpp` listener and talker as background processes inside the same bounded
 container, poll to a fixed deadline for at least one `I heard:` line, and use an in-container
@@ -1436,10 +1441,10 @@ times, QEMU once, and Compose once. Every entry must equal one of the four appro
 no prefix or substring match is sufficient. Make forbidden-command assertions against exact risky
 constructs such as `${{ secrets.`, `docker/login-action`, `ros2 topic pub`, `ros2 service call`,
 `ros2 action send_goal`, `docker login`, `--network=host`, `--network host`, `--net=host`,
-`--allow security.insecure`, `--allow=security.insecure`, and `--allow=network.host`, rather than
-generic words such as `secrets`, `service`, or `action` that also occur in safe YAML. The secrets
-pattern must tolerate optional YAML-expression whitespace so both `${{ secrets.X }}` and
-`${{secrets.X}}` are rejected.
+`--allow security.insecure`, `--allow=security.insecure`, `--allow network.host`, and
+`--allow=network.host`, rather than generic words such as `secrets`, `service`, or `action` that
+also occur in safe YAML. The secrets pattern must tolerate optional YAML-expression whitespace so
+both `${{ secrets.X }}` and `${{secrets.X}}` are rejected.
 
 Reject from the workflow: floating/unapproved actions, `pull_request_target`, login or secrets,
 artifacts, `docker push`, `--push`, `push: true`, vendor targets/tokens, AI runtime build,
