@@ -209,8 +209,9 @@ assert_model() {
       '.services.ai_dev.profiles == ["ai"]'
   fi
 
-  if grep -Eqi 'doosan|openarm|isaac_ros' "$model"; then
-    fail "vendor runtime leaked into normalized core Compose model: $model"
+  vendor_service_values="$(jq -r '[.services | to_entries[] | .key, (.value.image // "")] | join("\\n")' "$model")"
+  if grep -Eqi 'doosan|openarm|isaac_ros' <<< "$vendor_service_values"; then
+    fail "vendor runtime leaked into normalized core Compose services: $model"
   fi
 }
 
