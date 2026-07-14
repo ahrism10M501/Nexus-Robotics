@@ -324,18 +324,17 @@ extract the native child of the exact pinned uv OCI index once and run inside th
 the exact pinned ROS OCI index. They never mount the repository writable, never execute the uv
 scratch image as a runtime, never use QEMU/binfmt, and never use an unpinned image.
 
-For `--validate-only`, reuse that same native pinned uv binary and native pinned ROS container and
-create a writable temporary Python 3.12 venv before running the two explicit target-platform
-resolutions:
+For `--validate-only`, reuse that same native pinned uv binary and native pinned ROS container.
+Use disposable targets under the container tmpfs and run the two explicit target-platform
+resolutions without executing target-architecture code:
 
 ```bash
-/usr/local/bin/uv venv --python 3.12 /tmp/venv
-/usr/local/bin/uv pip install --dry-run --require-hashes --only-binary=:all: \
-  --python /tmp/venv/bin/python --python-version 3.12 \
-  --python-platform x86_64-manylinux_2_39 /requirements/ai.lock
-/usr/local/bin/uv pip install --dry-run --require-hashes --only-binary=:all: \
-  --python /tmp/venv/bin/python --python-version 3.12 \
-  --python-platform aarch64-manylinux_2_39 /requirements/ai.lock
+/usr/local/bin/uv pip install --dry-run --target /tmp/target-amd64 \
+  --require-hashes --only-binary=:all: --python-version 3.12 \
+  --python-platform x86_64-manylinux_2_39 -r /requirements/ai.lock
+/usr/local/bin/uv pip install --dry-run --target /tmp/target-arm64 \
+  --require-hashes --only-binary=:all: --python-version 3.12 \
+  --python-platform aarch64-manylinux_2_39 -r /requirements/ai.lock
 ```
 
 Expected: both target-platform resolutions select wheels only. An sdist, missing hash, missing
