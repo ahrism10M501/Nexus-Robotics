@@ -918,16 +918,28 @@ scans return no match.
 - [ ] **Step 1: Write failing doctor scenarios**
 
 Cover missing Docker, Compose below 2.30, invalid env, non-x86_64, missing NVIDIA prerequisite,
-missing Isaac root, non-executable launcher, incompatible `VERSION`, FastDDS/domain mismatch, and
-success. Stub `uname`, `nvidia-smi`, Docker, the launcher, `${ISAAC_SIM_ROOT}/VERSION`, and ROS CLI
-through temporary fixtures; assert default output is at most six lines and `--verbose` includes
-individual checks.
+missing Isaac root, non-executable launcher, incompatible `VERSION`, FastDDS/domain/network/bind
+mismatch, stopped service, missing graph/topic, timed-out observation, and success. Stub `uname`,
+`nvidia-smi`, Docker, the launcher, and `${ISAAC_SIM_ROOT}/VERSION` through temporary fixtures; the
+ROS CLI must be observed only as argv passed to the already-running Compose service, never as a host
+dependency. Assert doctor success is one line, acceptance output and every default FAIL/SKIP are
+three lines, and every default result is at most six lines; `--verbose` includes individual checks.
+Use a controlled `PATH` in every fixture so real Docker, NVIDIA, ROS, and Isaac commands are
+unreachable. Record external argv
+NUL-delimited, make the fake Docker reject every non-allow-listed verb, and give the fake launcher a
+sentinel that proves diagnostics never execute it.
 
 - [ ] **Step 2: Verify RED**
 
-Run: `bash tests/test_doctor.bash`
+Run both independently:
 
-Expected: FAIL because `scripts/doctor.bash` is absent.
+```bash
+bash tests/test_doctor.bash
+# Expected: FAIL because scripts/doctor.bash is absent.
+
+bash tests/test_isaac_host.bash
+# Expected: FAIL because scripts/check_isaac_host.bash is absent.
+```
 
 - [ ] **Step 3: Implement doctor and launcher contracts**
 
@@ -940,31 +952,84 @@ FAIL E_PREREQUISITE
 ```
 
 Core checks Docker Engine, Compose 2.30+, BuildKit availability, env validity, and repository
-files. Resolve the Isaac root exactly as:
+files. Core remains architecture-neutral: `x86_64`, NVIDIA, and Isaac installation checks occur
+only in `isaac-host` mode. Parse the repository `.env` through `nexus_validate_env`; require
+`RMW_IMPLEMENTATION=rmw_fastrtps_cpp` and `ISAAC_SIM_COMPAT_VERSION=6.0.1`. Capture a non-empty
+ambient `ISAAC_SIM_ROOT` before validation so the parser cannot erase an explicit host override.
+Otherwise use the parsed non-empty value, then fall back exactly as below; reject an unset or empty
+`HOME` before constructing the fallback.
 
 ```bash
 ISAAC_SIM_ROOT="${ISAAC_SIM_ROOT:-$HOME/isaacsim}"
 ```
 
 Isaac-host additionally requires host `uname -m` to be `x86_64`, a successful read-only NVIDIA
-prerequisite probe, executable `$ISAAC_SIM_ROOT/isaac-sim.sh`, readable
-`$ISAAC_SIM_ROOT/VERSION` beginning with the configured `6.0.1`, host network support, both FastDDS
-variables resolving to the repository `config/fastdds.xml`, `rmw_fastrtps_cpp`, and the same
-`ROS_DOMAIN_ID` as normalized Compose output. It must not install drivers/packages, download Isaac,
-change GPU settings, or issue simulator/robot motion commands.
+prerequisite probe, executable `$ISAAC_SIM_ROOT/isaac-sim.sh`, and a regular readable
+`$ISAAC_SIM_ROOT/VERSION`. Read only its first line, remove one optional trailing carriage return,
+never print its content, and use a literal-safe comparison equivalent to `^6\.0\.1([+-].*)?$`;
+`6.0.10` is incompatible. Later lines, if any, are non-authoritative and must neither alter the
+decision nor reach output. The normalized Compose model must use host network, expose
+both FastDDS variables as `/workspace/config/fastdds.xml`, use `rmw_fastrtps_cpp`, match the
+validated `ROS_DOMAIN_ID`, and bind this repository to `/workspace`. It must not install
+drivers/packages, download Isaac, change GPU settings, or issue simulator/robot motion commands.
 
-`scripts/launch_isaac_sim.sh` must use the same safe default, export `ROS_DOMAIN_ID`,
-`RMW_IMPLEMENTATION`, and both FastDDS profile variables, then
+`scripts/launch_isaac_sim.sh` must use the same parsed values and root-precedence rule, require the
+same RMW/version pins, export `ROS_DOMAIN_ID`, `RMW_IMPLEMENTATION`, and both FastDDS profile
+variables as the canonical host path `$ROOT/config/fastdds.xml`, then
 `exec "$ISAAC_SIM_ROOT/isaac-sim.sh" "$@"`. It must not install or download Isaac Sim.
 
-`scripts/check_isaac_host.bash` is a non-destructive bridge acceptance. It never starts Isaac and
-never publishes or invokes a service. Exit 77 with `SKIP E_PREREQUISITE` only when installation or
-host prerequisites are absent, such as no Isaac root/launcher, non-x86_64 host, or unavailable
-NVIDIA prerequisite. An installed but unreadable/incompatible version is FAIL. Once a compatible
-installation, NVIDIA, launcher, and version prerequisites exist, an absent ROS graph/topic or a
-timed-out `/clock` observation is also blocking non-77 FAIL. Success exits 0.
-`tests/test_isaac_host.bash` covers these PASS, allowed-SKIP, incompatible-version FAIL, missing-graph
-FAIL, and missing-topic FAIL cases distinctly.
+`scripts/check_isaac_host.bash` is a non-destructive bridge acceptance. Reuse Task 5's
+`nexus_load_profile isaac-host` and `nexus_compose_args`; do not duplicate profile parsing. It never
+starts Isaac or a container, never invokes the launcher, and never publishes, calls a service, or
+invokes an action. In particular, it must not call `docker compose up`, `run`, or `start`.
+
+After validating the same normalized network, FastDDS, bind, RMW, and domain contract as doctor,
+allow only Compose `config`, `ps`, and `exec` plus Docker `inspect`. Require Compose `ps -q` to
+produce exactly one running container ID; zero or multiple IDs are non-77 FAIL. Confirm its actual
+network mode is host with read-only `docker inspect`. Missing Docker or Compose is also non-77 FAIL
+after the installation/host prerequisite phase.
+
+Bound both ROS observations with host `timeout`. Because Compose exec does not replay the image
+entrypoint, use only fixed, non-interpolated container commands of this form:
+
+```text
+bash --noprofile --norc -c 'source /etc/profile.d/nexus_env.bash; exec ros2 topic list'
+bash --noprofile --norc -c 'source /etc/profile.d/nexus_env.bash; exec ros2 topic echo /clock --once'
+```
+
+Pass them through `docker compose exec -T`; host `ros2` is never a prerequisite. Any lifecycle verb,
+including `build`, `pull`, `create`, `up`, `run`, `start`, `restart`, `stop`, or `down`, is forbidden.
+
+Exit 77 with `SKIP E_PREREQUISITE` only when installation or host prerequisites are absent: the
+Isaac root/launcher path does not exist, host architecture is not `x86_64`, or the read-only NVIDIA
+probe is unavailable. If an installation path exists but its launcher is not executable, or its
+`VERSION` is missing, unreadable, or incompatible, return non-77 FAIL. Invalid env/Compose/network
+state, a stopped service, absent ROS graph/topic, or timed-out `/clock` observation is also blocking
+non-77 FAIL once installation prerequisites exist. Evaluate acceptance failures deterministically in
+this order: architecture, NVIDIA, root/launcher presence, launcher mode, version, env, Docker and
+Compose, normalized contract, running ID and actual network, graph list, `/clock` presence, bounded
+echo. Success exits 0.
+
+Doctor success is exactly `PASS`. Doctor failure keeps the three-line form above. Acceptance always
+uses exactly three lines:
+
+```text
+PASS
+/clock observed
+no action required
+```
+
+or `FAIL E_PREREQUISITE` / `SKIP E_PREREQUISITE` followed by the failed or absent invariant and one
+remediation command. Never include raw version-file content or unbounded command output.
+
+`tests/test_doctor.bash` additionally proves base mode succeeds with a stubbed `aarch64` host while
+Isaac-host mode rejects it; Compose 2.29.9 fails and 2.30.0 succeeds; BuildKit failure is detected;
+and `6.0.1-rc` succeeds while `6.0.10` fails. `tests/test_isaac_host.bash` covers PASS, every allowed
+SKIP, installed-but-invalid FAIL, stopped-service/graph/topic/timeout FAIL, actual host-network
+inspection, exact allowed Docker/ROS argv, launcher non-execution, and launcher environment/argument
+forwarding distinctly. Include Compose `v2.30.0`, a suffixed 2.30 release, and a later major such as
+`5.3.1`; exact/`-rc`/`+build`/`6.0.10`, CR, multiline, missing, and unreadable version fixtures;
+missing Docker/Compose; zero/multiple running IDs; list timeout; and echo timeout.
 
 - [ ] **Step 4: Verify GREEN and commit**
 
