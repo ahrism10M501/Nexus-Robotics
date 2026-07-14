@@ -1,20 +1,19 @@
-# doosan-robotics Branch
+# doosan-tutorial Branch
 
 ## Parent and synchronization
 
-Parent: `main`. This branch temporarily starts from `refactor/core-branch-layout`
-until core PR #1 merges. Merge parent updates into this branch; do not rebase it or
-merge from another robot branch.
+Parent: `doosan-robotics`. Merge updates from that parent into this branch; do not
+merge this tutorial branch back into its parent or into `main`.
 
 ## Owns
 
-Doosan upstream source pins and patches, driver and emulator integration, A-series
-robot models, and Doosan-specific MoveIt/RViz/Gazebo profiles.
+Doosan-specific learning days, reproducible launch examples, optional scene assets, and
+checkpoint instructions that use the parent branch's supported runtime.
 
 ## Does not own
 
-Core Docker/DDS behavior, OpenArm code, shared tutorial infrastructure, or OpenArm
-assets. Propose a vendor-neutral interface to `main` before sharing runtime code.
+Doosan drivers, emulator behavior, Docker/Compose profiles, core infrastructure, or any
+OpenArm content. Fix runtime defects in `doosan-robotics` first and merge them here.
 
 ## Safe start
 
@@ -23,8 +22,8 @@ assets. Propose a vendor-neutral interface to `main` before sharing runtime code
 ./run.sh doctor
 ```
 
-Doosan runtime profile commands will be introduced only with a pinned and tested
-branch-local runtime PR.
+Follow only tutorial steps documented after a matching `doosan-robotics` runtime PR
+has supplied its profile and launch commands.
 
 ## Verification
 
@@ -32,9 +31,10 @@ branch-local runtime PR.
 bash tests/run_all.bash --checks
 ```
 
-Run branch-local source, build, and emulator checks after the runtime PR adds them.
+Each future lesson must include a no-hardware checkpoint before its manual emulator or
+robot step.
 
 ## Hardware safety
 
-No command in the current branch may enable, home, or move a physical robot. Any future
-hardware test requires an operator-approved manual HIL procedure.
+Tutorial text must not provide automatic enable, home, or motion commands. Physical robot
+steps require a separate operator-approved HIL checklist.
