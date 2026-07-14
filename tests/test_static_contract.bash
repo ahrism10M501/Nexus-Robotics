@@ -54,7 +54,7 @@ mapfile -t active_docs < <(
       case "$path" in
         README.md|docs/*.md)
           case "$path" in
-            docs/superpowers/*) ;;
+            docs/superpowers/*|docs/next-runtime-pr.md) ;;
             *) printf '%s\n' "$path" ;;
           esac
           ;;
