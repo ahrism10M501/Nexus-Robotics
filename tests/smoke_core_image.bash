@@ -70,6 +70,9 @@ finalize() {
       docker container inspect "$owned_cid" >/dev/null 2>&1; then
       if ! timeout --kill-after=2s 10s docker rm -f "$owned_cid" >/dev/null 2>&1; then
         printf 'E_CLEANUP: could not remove owned container %s\n' "$owned_cid" >&2
+        if ((original_status == 0)); then
+          final_status=1
+        fi
       fi
     fi
   elif ((original_status == 0)); then

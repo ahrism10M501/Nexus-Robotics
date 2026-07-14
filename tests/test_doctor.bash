@@ -229,6 +229,10 @@ root="$(new_fixture)"
 rm "$root/config/fastdds.xml"
 run_doctor "$root" base
 assert_fail 'missing repository file' 'repository files'
+[[ "$output" == *'restore only: config/fastdds.xml'* ]] ||
+  fail "missing-file remediation did not name the exact path: $output"
+[[ "$output" != *'git restore --source=HEAD -- .'* ]] ||
+  fail "missing-file remediation recommended a repository-wide restore: $output"
 
 # Isaac-host-only platform and installation checks.
 root="$(new_fixture)"

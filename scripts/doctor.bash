@@ -13,6 +13,7 @@ NEXUS_CONTAINER_FASTDDS=/workspace/config/fastdds.xml
 NEXUS_SERVICE_BLOCK=''
 NEXUS_NORMALIZED_CONFIG=''
 NEXUS_VERBOSE=0
+NEXUS_MISSING_REPOSITORY_FILES=''
 
 nexus_usage_error() {
   printf 'E_USAGE\n%s\n' "$1" >&2
@@ -171,6 +172,7 @@ nexus_validate_core_env() {
 
 nexus_check_repository_files() {
   local path
+  local -a missing=()
   local -a required=(
     .env.example
     Dockerfile
@@ -184,8 +186,12 @@ nexus_check_repository_files() {
     scripts/lib/profile.bash
   )
   for path in "${required[@]}"; do
-    [[ -f "$ROOT/$path" && -r "$ROOT/$path" ]] || return 1
+    [[ -f "$ROOT/$path" && -r "$ROOT/$path" ]] || missing+=("$path")
   done
+  ((${#missing[@]} == 0)) && return 0
+  printf -v NEXUS_MISSING_REPOSITORY_FILES '%s ' "${missing[@]}"
+  NEXUS_MISSING_REPOSITORY_FILES="${NEXUS_MISSING_REPOSITORY_FILES% }"
+  return 1
 }
 
 nexus_doctor_main() {
@@ -240,7 +246,8 @@ nexus_doctor_main() {
   nexus_check_note 'environment'
 
   if ! nexus_check_repository_files; then
-    nexus_doctor_fail 'required repository files are missing or unreadable' 'git restore --source=HEAD -- .'
+    nexus_doctor_fail 'required repository files are missing or unreadable' \
+      "inspect local changes, then restore only: $NEXUS_MISSING_REPOSITORY_FILES"
     return
   fi
   nexus_check_note 'repository-files'

@@ -1,6 +1,6 @@
 # Host-first Core Design
 
-**Status:** approved for the first milestone  
+**Status:** approved for the first milestone
 **Supersedes:** ARM64 runtime/build acceptance in the 2026-07-14 branch architecture design
 
 ## Goal

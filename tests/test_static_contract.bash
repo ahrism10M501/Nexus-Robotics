@@ -820,7 +820,8 @@ test -n "$second_cidfile" || fail 'second helper invocation did not allocate a c
 test "$first_cidfile" != "$second_cidfile" || fail 'helper reused a cidfile path across invocations'
 
 invoke_smoke cleanup-fail linux/amd64 core:test x86_64
-test "$smoke_status" -eq 0 || fail 'cleanup failure replaced successful run status'
+test "$smoke_status" -eq 1 || fail 'cleanup failure after a successful run must exit 1'
+assert_contains "$smoke_output" 'E_CLEANUP'
 test "$(grep -Fxc "rm -f $owned_cid" "$docker_log")" -eq 1 || \
   fail 'cleanup-failure case did not target the owned CID'
 assert_owned_removals_only
