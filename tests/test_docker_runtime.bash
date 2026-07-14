@@ -56,14 +56,4 @@ done
 assert_zero_id_build_fails 0 1000
 assert_zero_id_build_fails 1000 0
 
-ai_image="${image_prefix}:ai"
-docker build --target ros-ai-dev --tag "$ai_image" .
-docker run --rm "$ai_image" bash -lc '
-  set -euo pipefail
-  test "$(id -un)" = developer
-  uv pip check --python /opt/venv/bin/python
-  /opt/venv/bin/python -c \
-    "import diffusers, einops, huggingface_hub, timm, torch, torchvision"
-'
-
 printf 'Docker runtime contract passed\n'

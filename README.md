@@ -117,8 +117,17 @@ bash scripts/check_isaac_host.bash
 ./run.sh check
 ```
 
-현재 단계에서는 core ownership, 이식성, pinned dependency 계약을 검사합니다. CI와
-로컬 검증 진입점은 후속 core 변경에서도 같은 명령 계층을 유지합니다.
+`./run.sh check`가 호출하는 `scripts/check_dev_workflow.sh`는 기본 `--core` tier를
+선택합니다. AI runtime까지 포함한 완전한 로컬 검증은
+`bash tests/run_all.bash --full`로 명시적으로 실행합니다.
+
+```bash
+bash tests/run_all.bash --full
+```
+
+14.4 GB인 AI runtime 이미지는 표준 CI의 저장 공간을 초과하므로 CI에서는 빌드하지
+않으며, `--full` 실행에는 충분한 로컬 디스크가 필요합니다. CI는 대신 universal hashed
+AI lock과 architecture-specific wheel 선택을 amd64와 arm64 모두에서 계속 검증합니다.
 
 ## 문제 해결
 
